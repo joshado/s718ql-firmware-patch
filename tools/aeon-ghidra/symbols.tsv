@@ -25,7 +25,7 @@
 0x002d0a34	data	p_scaler_state	[C] pointer to the scaler/window state struct (+0x47b=language, +0x45d=window idx)
 0x0030f6d8	data	g_window_info	[I] per-window info array, stride 0x84; [0]=current input/source type
 0x00304d14	data	g_osd_string_base	[C] set to 0x2da620 before rendering
-0x002da620	data	osd_string_region	[C] OSD string-region base
+0x002da620	data	osd_string_region	[C] OSD string-region BASE. ALL menu text is accessed as this base + offset (no code addresses 0x2e4000+ directly) -> why string refs are never found directly
 0x0030574c	data	g_osd_small_font	[?] engine picks 0x12/0x18 glyph height from this
 0x002e8998	data	osd_strtbl_a	[?] (ptr,len) chain, entries point mid-message; exact structure unclear (not clean per-language screens)
 0x002e95b4	data	osd_strtbl_b	[?] referenced by 0x1e4a5e; not a clean (ptr,len) table
@@ -36,3 +36,15 @@
 0x002aacf9	data	str_enable_frame_color	[C] "[msScalerAP] Enable Frame Color" (referencing code NOT located)
 0x002b013e	data	str_mute_bmp_logo	[C] "Mute BMP Logo!"
 0x002ecd94	data	str_nosignal_hdmi1_en	[C] "No HDMI 1 (2.0) signal. Press <Source> to switch input." (English)
+#
+# ---- OSD screen/message renderers (the 12 functions that set osd_string_region) ----
+# They render OSD screens; dispatched INDIRECTLY (no direct callers, no raw
+# function pointers -> computed jump/switch, unresolved). The no-signal screen
+# is among these; the blue background fill is in their (unfound) caller.
+0x001e4828	func	osd_screen_1e4828	[?] OSD renderer (sets osd_string_region)
+0x001e99ab	func	osd_screen_1e99ab	[?] OSD renderer; branches on g_osd_mode==0x19
+0x001e9c40	func	osd_show_glyph_fields	[?] OSD render helper (string + fields); called by several screens
+0x001e9e87	func	osd_screen_1e9e87	[?] OSD renderer (shows id 0xe8)
+0x001ea2f4	func	osd_screen_1ea2f4	[?] OSD renderer -> osd_show_glyph_fields(4,0x70,..)
+0x001ea3c8	func	osd_screen_1ea3c8	[?] OSD renderer; branches on g_osd_mode!=0x02 -> osd_show_glyph_fields(9,0xc0,..)
+0x001ea882	func	osd_screen_1ea882	[?] OSD renderer (PQ debug dump path)
