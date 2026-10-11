@@ -32,6 +32,28 @@ binary, runs auto-analysis, and writes a full listing via
 calls (`b.jal`), returns (`b.jr r9`) and `b.movhi`+`b.addi` address pairs all
 decode cleanly.
 
+## Naming / symbol recovery
+
+`analyze.sh <binary>` runs the full pipeline (define strings, recover pointers,
+name from strings, export `.asm` + `.c` + `scaler_symbols.tsv`). The naming
+scripts are `DefineStrings.java`, `AeonResolvePointers.java`,
+`NameFromStrings.java`.
+
+**Outcome on the scaler AP:** ~10 functions auto-named and ~37 annotated with
+the debug strings they reference (PQ/GPO timing, `MONITOR_FLAGS`,
+`USER_PREF_WIN_SEL`, panel power-off, SERFLASH, …). `scaler_symbols.tsv` is the
+per-function record. The rest stay `FUN_ram_*`.
+
+**Why not more — the AEON reference gap.** Ghidra ships no constant-reference
+analyzer for AEON, and `SymbolicPropogator` does not recover the `b.movhi`+
+`b.addi` split-immediate pointers either, so the decompiler only folds a
+subset (~37-46 functions) of the code→string pointers. The debug strings are
+also stored as one packed, null-separated blob that code indexes into
+mid-way, so some resolved refs land on fragments. Together these cap
+string-driven naming at a few dozen functions. Fuller naming needs a real AEON
+split-immediate reference analyzer (movhi+addi/ori/load/store → target), or the
+upstream author's own scripts/Reko projects.
+
 ## Notes / limits
 
 - **Endianness:** the plugin ships only `AEON:BE:32:R2`. AEON instructions are

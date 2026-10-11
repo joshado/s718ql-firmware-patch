@@ -151,6 +151,17 @@ load at base **`0x180000`** (the header's `ap_ram_start`). The reset/exception
 vectors are at the start of the AP prefix (`0x180100`). The DSP/SIMD pseudo-ops
 and the unresolved table mapping (below) are the known gaps.
 
+**Symbol recovery (partial).** `tools/aeon-ghidra/analyze.sh` names functions
+from the debug strings they reference. Yield is low — ~10 auto-named, ~37
+annotated with their strings (`scaler_symbols.tsv`) — because Ghidra has no
+AEON constant-reference analyzer and the `movhi`+`addi` string pointers mostly
+stay unresolved (only the ~37-46 the decompiler folds are usable), and the
+debug strings are a packed blob indexed mid-way. Useful anchors recovered: PQ
+and GPO/Panel timing dumps, `MONITOR_FLAGS`, `USER_PREF_WIN_SEL`, panel
+power-off, the SERFLASH driver. Fuller naming needs a real AEON split-immediate
+reference pass. The string *content* is fully available regardless via
+`tools/mst9u_strings.py` and the defined-string listing.
+
 **Memory map — refined by the disassembly.** The whole decompressed blob maps
 contiguously from `0x180000` (file offset `N` → RAM `0x180000 + N`): the
 `b.movhi`+`b.addi` address pairs reach data at e.g. `0x309F84`, past the image

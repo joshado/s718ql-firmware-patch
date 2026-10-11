@@ -8,3 +8,5 @@ firmware/
 **/*.aeon.asm
 **/*.aeon.c
 tools/aeon-ghidra/*.zip
+**/scaler_symbols.tsv
+**/sample.c
