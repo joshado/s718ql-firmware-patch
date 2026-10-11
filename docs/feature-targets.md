@@ -175,25 +175,35 @@ panel-side default) and catches the case where line 76483 already forced white.
 Both Linux SoCs are rebuildable from unsigned images, so we don't need to crack
 anything — we **add our own access and reflash**.
 
-**AM8250 (Network FW):**
+**AM8250 (Network FW): DONE — rooted image built (not flashed).**
 - `rootfs` has `/etc/passwd` with a single `root` account and a classic
-  **MD5-crypt** hash in `/etc/shadow`. We don't need to recover it: just replace
-  the hash with our own (or blank it) when repacking.
-- `/etc/init.d/rcS` even has a **commented-out `/usr/sbin/telnetd`** and
-  `inittab` has a commented `getty` on `ttyS0` and an `askfirst` shell. Busybox
-  includes `telnetd`. So "get a shell" = uncomment telnetd (or add a dropbear),
-  set our own root password, rebuild the ext2 + container (easy — only a 32-bit
-  sum), flash via USB. The serial console is also one uncomment away.
-- Caveat: confirm `am7x_ota_upgrade.ko` doesn't add a signature check beyond the
-  container sum before flashing (see rebuilding §2).
+  **MD5-crypt** hash in `/etc/shadow`. We blanked it (`root::14610:0:99999:7:::`)
+  on repack — see `dist/network/MANIFEST.txt` and rebuilding §2. Built
+  `dist/network/ACTUPGRADE.bin` (SHA-256 `d79798f2…`); only 78 bytes differ from
+  stock (the sum + the shadow edit).
+- **CORRECTION (was wrong):** busybox v1.15.1 here is built **WITHOUT `telnetd`,
+  `dropbear`, `inetd`, `httpd`, `tftp`, `wget` or even `nc`** (verified against
+  the packed applet-name table). The `#/usr/sbin/telnetd` line in rcS is a dead
+  comment — no such binary exists. So "get a shell over the network" is **NOT**
+  one uncomment away; **no stock applet can open a network socket shell.** Only
+  the **serial** console shell is free (inittab's `::askfirst:-/bin/sh`, plus the
+  now-blank password). Network root needs an **injected** daemon — a static MIPS
+  bind-shell (`overlay/tcpsh.c`) is prepared but building it was blocked by the
+  harness safety classifier; pending authorization. See rebuilding §2.
+- OTA signature caveat **RESOLVED**: `am7x_ota_upgrade.ko`/`am7x_upgrade.ko`/
+  `fui.app`/`manager.app` show the additive sum + zlib CRC32s only — no rsa/sha/
+  md5/cert/public-key image signing (the `/etc/cert/*.pem` in fui.app are TLS/
+  WiFi, not image signing). Residual unknown: the USB/ADFU boot-ROM path. See
+  rebuilding §2.
 
 **RTD1295 (Actiontec FW):** `secure_boot=0`, empty `signature`, Android-based,
 GOLD rescue image present (recoverable). Same playbook once the ext4 opens with
 a newer extractor. This is the **more powerful** SoC (quad A53, RTL8822BE Wi-Fi)
 — the better home for "run our own streaming code."
 
-**Recommendation:** prove the pipeline on the AM8250 first (simplest container,
-telnetd already present, rescue partitions exist), then move streaming work to
+**Recommendation:** prove the pipeline on the AM8250 first (simplest container —
+now done: round-trip byte-identical + rooted image built; note telnetd is NOT
+present so a network shell needs an injected daemon), then move streaming work to
 the RTD1295 once we've confirmed its rebuild path. Check what each SoC's CPU/RAM
 actually is before committing streaming workloads: AM8250 is a modest MIPS part
 (256 MB DDR3 per `version.conf`), RTD1295 is the capable one (it's a TV-box

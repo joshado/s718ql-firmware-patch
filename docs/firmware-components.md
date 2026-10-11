@@ -361,9 +361,11 @@ Flash". Internals not yet mapped.
 ## 3. Network FW — `ACTUPGRADE.bin` (Actions Micro AM8250) — CONFIRMED (container)
 
 Actions-Micro "ActionsFirmware" container, `UpdateVer:v1.27`. Parsed by
-`tools/act_unpack.py`. 32-byte records from offset 0x40; the checksum record at
-0x20 holds a **32-bit additive sum** over the body which we **reproduce exactly**
-(`0x30cf215e`). Records:
+`tools/act_unpack.py`, rebuilt by `tools/act_repack.py` (**round-trip byte-
+identical**). 32-byte records from offset 0x40; the checksum record at 0x20
+(`name[16]`, then `<4I` at 0x30: `hdr_len=0x40`, `body_len=0x10127bc0`, `0`,
+`checksum`) holds a **32-bit additive sum of the little-endian u32 words over the
+body `[0x40 : EOF]`, mod 2^32** — reproduced exactly (`0x30cf215e`). Records:
 
 | Record | Offset | Size | Meaning |
 |---|---|---|---|
@@ -374,33 +376,85 @@ Actions-Micro "ActionsFirmware" container, `UpdateVer:v1.27`. Parsed by
 | bak | 0xfd1ba00 | 0x400000 | **ext2** (wifi/hostapd configs) |
 | vram | 0x1011ba00 | 0xc200 | FAT (runtime state) |
 
-**rootfs contents (confirmed):** busybox Linux (MIPS, `/lib/ld.so.1`),
-`/etc/init.d/rcS`, EZCast app set under `/am7x/bin` (`manager.app`, `fui.app`,
-`miracast.app`, `rs232_main.app`, `wol.app`, ...). Kernel `2.6.27.29`. See
-[`feature-targets.md`](feature-targets.md) for the root-access details (c) and
-the already-present `wol.app`/RS232 handlers relevant to (d).
+**rootfs contents (confirmed):** busybox **v1.15.1** (MIPS32r2, little-endian,
+o32, glibc `/lib/ld.so.1`), `/etc/init.d/rcS`, EZCast app set under `/am7x/bin`
+(`manager.app`, `fui.app`, `miracast.app`, `rs232_main.app`, `wol.app`, ...).
+Kernel `2.6.27.29`. The ext2 uses **1 KiB blocks**; `/etc` files are mode 0775,
+uid/gid **1023** (vendor quirk — preserve on edit). **This busybox has no network
+shell applet** (no `telnetd`/`dropbear`/`inetd`/`httpd`/`tftp`/`wget`/`nc`; net
+applets are only arp/arping/ifconfig/netstat/ping/route/rx/udhcpc/udhcpd) — see
+[`feature-targets.md`](feature-targets.md) (c). The on-device update modules
+(`am7x_ota_upgrade.ko`, `am7x_upgrade.ko`, driven by `fui.app`) verify **only the
+additive sum + zlib CRC32s** — no image signing (see [rebuilding.md](rebuilding.md) §2).
 
-Extract a filesystem image with `7z x part_rootfs.bin` (p7zip reads ext2).
+Extract a filesystem image with `7z x part_rootfs.bin` (p7zip reads ext2), or edit
+in place on a work copy with `debugfs -w` in Docker.
 
 ---
 
-## 4. Actiontec FW — `install.img` (Realtek RTD1295) — identified
+## 4. Actiontec FW — `install.img` (Realtek RTD1295) — CONFIRMED (container + rootfs)
 
-A **GNU tar** (not a custom container). `config.txt` inside declares the install
-plan: `version="SBDP1.05"`, `secure_boot=0`, empty `signature=""`, and a list of
-partitions/images to write (`rootfs.ext4.bin` 700 MB, `etc.ext4.bin`,
-kernels `emmc.uImage` (ARM64), dtb `Realtek,rtd-1295`, `bluecore.audio`,
-bootloader.tar, teeUtility.tar, a GOLD rescue set, etc.).
+A **GNU tar** (not a custom container) with a **trailing MD5**. `config.txt`
+inside declares the install plan: `version="SBDP1.05"`, `secure_boot=0`, empty
+`signature=""`, and a list of partitions/images to write (`rootfs.ext4.bin`
+700 MB partition, `etc.ext4.bin`, kernels `emmc.uImage` (ARM64), dtb
+`Realtek,rtd-1295`, `bluecore.audio`, bootloader.tar, teeUtility.tar, a GOLD
+rescue set, etc.).
 
+**Container format — fully solved** (`tools/act_install_repack.py`):
+
+```
+install.img = [ GNU tar archive, ustar, padded to a 512-byte block boundary,
+                ending at offset 177213440 ]
+            + [ 32 ASCII-hex bytes = md5( bytes[0 : 177213440] ) ]
+```
+
+The 32-byte ASCII-hex tail of the m0r005 image is `7a28d01aa0082c2d5a9f8a6db1033fd8`
+= `md5()` of everything before it — **reproduced exactly**. This trailing MD5 is
+the package integrity gate (a known Realtek `install.img` pattern). Measured tar
+layout (physical member order, which is NOT config.txt order): `ALSADaemon`,
+`config.txt`, `customer.tar`, `generic/`, `generic/gold.rescue.emmc.uImage`,
+`generic/rootfs.ext4.bin` (data at offset **12366848**, size **112051200**),
+`generic/etc.ext4.bin`, `gold.rescue.emmc.dtb`, `emmc.uImage`,
+`android.emmc.dtb`, `bluecore.audio`, `gold.bluecore.audio`, `factory.tar`,
+`bootloader.tar`, `gold.rescue.root.emmc.cpio.gz_pad.img`, `bootfile.image`,
+`install_a`, `mke2fs`, `teeUtility.tar`.
+
+- `install_a` (ARM 32-bit, static, stripped) does **not** parse the tar
+  ("Install_a doesn't parse the tarfile"); an outer step untars and `install_a`
+  burns the extracted files. Its `do_sha256`/`sha256_sig` path is the
+  **secure-boot signature branch** — gated off by `secure_boot=0`. config.txt
+  carries no `verify=`/`checksum=` tokens, so editing a partition trips no
+  stored per-part hash. So the only enforced gate is the trailing MD5.
 - `etc.ext4.bin` extracts cleanly (p7zip): Wi-Fi calibration `cal-8822be`,
   `p2p_supplicant.conf`, ScreenBeam `aei/` data.
 - `rootfs.ext4.bin` is a large ext4 with extents; the system p7zip (17.05)
-  misidentifies it as ELF — needs a newer p7zip or a real `debugfs`/loopback
-  mount to walk. Tracked in rebuilding doc.
+  misidentifies it as ELF — use a Linux loopback mount / `debugfs` under Docker
+  (`mount -o loop,ro firmware/unpacked/actiontec/generic/rootfs.ext4.bin ...`).
 - `customer.tar` holds the on-screen updater UI (`install_UI.exe`, PNGs,
   DroidSans.ttf).
 
-`secure_boot=0` + empty signature is the encouraging part for custom code (c).
+**The rootfs is embedded Linux, NOT Android — corrects a standing assumption.**
+`rootfs.ext4.bin` mounts at `/` and is a **BusyBox + glibc** system with
+SysV/BusyBox init (`/sbin/init -> bin/busybox`, `/etc/inittab`, `/etc/init.d/`).
+There is **no Android** anywhere: no property system (`*.prop`), no `init*.rc`,
+no `adbd`, no `/system/app` (only an empty `/system/vendor`). This is a
+**ScreenBeam-style wireless-display appliance** (matches the `aei/` data, Mali
+GPU modprobe in `S31user-init`, `miracast.conf`, `/usr/local/bin/IMS_Modules/main-demo`).
+So any Android-rooting recipe (ro.secure/ro.debuggable/adbd) does not apply here.
+
+**Root access is largely open by design** (confirmed from the mounted image):
+- `/etc/shadow`: `root::...` — root has an **empty password**.
+- `/etc/inittab`: a `getty -L ttyS0 115200` on serial → passwordless root console.
+- `/etc/inetd.conf`: `telnet` enabled + `S41inetd` starts inetd → network telnet
+  on port 23, reaching `/bin/login` which accepts empty-password root.
+- `/bin/busybox` is setuid-root; `/bin/su` present.
+- rootfs is remounted **read-only** at boot (`mount -o remount,ro /` in inittab);
+  fstab mounts `/` as plain ext2/ext4 — **no dm-verity / AVB**.
+
+`secure_boot=0` + empty signature + GOLD rescue set + no verity ⇒ a modified
+image is accepted and a bad flash is recoverable. See
+[rebuilding.md](rebuilding.md) §3 for the proven repack + rooting recipe.
 
 ---
 
