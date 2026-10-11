@@ -17,3 +17,22 @@
 0x002f0594	data	str_nosignal_hdmi1_en	[C] "No HDMI 1 (2.0) signal. Press <Source>..." (English); master[4][0]
 0x001e73fe	func	osd_no_input_handler	[C] no-input/no-signal state handler: sets g_osd_mode=4, branches on input flags DAT_ram_00304b88, calls scaler register writes (the blue background fill is among these)
 0x001c62f9	func	scaler_reg_write	[?] (reg,val,mask) register write; e.g. (0x101d20,0,1)
+#
+# ---- traced from osd_no_input_handler (0x1e73fe) ----
+0x001ff83c	func	osd_set_frame_color	[C] prints "Enable Frame Color", writes scaler colour regs = the no-signal background/frame fill
+0x001fe47d	func	osd_draw_mute_logo	[C] references "Mute BMP Logo"; draws the mute/logo screen
+0x001f1530	func	scaler_set_tcon_format	[C] references "TCON_Format%d"; timing-controller setup
+0x001c91cf	func	dbg_print	[C] debug print (no-op unless g_dbg_enable set); takes a string arg
+0x001c6162	func	scaler_mmio_write_byte	[C] byte write to a scaler register: *(g_scaler_mmio_base + enc(reg)) = val
+0x001c64ed	func	scaler_reg_write24	[C] writes a 24-bit value (e.g. RGB colour) to reg,reg+1,reg+2 via scaler_mmio_write_byte
+0x001e17b6	func	scaler_setup_17b6	[?] writes scaler reg 0x101d20 (called by no-input handler)
+0x001e2d66	func	scaler_setup_2d66	[?] writes scaler reg 0x101d40
+0x001e2b82	func	scaler_setup_2b82	[?] scaler register setup
+0x001f0110	func	scaler_setup_f0110	[?] larger scaler/panel setup (many sub-calls)
+0x00304bdc	data	g_scaler_mmio_base	[C] base pointer for scaler MMIO register writes
+0x00305080	data	g_dbg_enable	[C] debug-print enable flag (gates dbg_print)
+0x00304b88	data	g_input_status	[I] input/detect status flags (bits 8, 0x2000, 0x4000, 0x8000)
+0x0030a009	data	g_input_substate	[?] used in no-input handler
+0x00307ba4	data	g_osd_substate	[?] OSD sub-state (compared ==2/3/4/6)
+0x00309f80	data	g_window_ctx	[I] per-window context array (stride 0x70); indexed in frame-color fn
+0x002cfd98	data	g_timer_cfd98	[?] set to 100 on signal loss
