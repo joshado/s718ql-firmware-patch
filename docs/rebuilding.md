@@ -182,8 +182,11 @@ the riskiest. Not needed for any current feature target, so parked.
 
 1. **act_repack.py** + **a Nuvoton/NXP HEX round-trip** — easy, confidence-
    building, and NXP/Nuvoton are where the power/serial features live.
-2. **Scaler string table** — solve `0x1b41bbca`, then do the `unplg` fix and the
-   no-signal colour change as data-only edits.
+2. **Scaler data edits** — the container is fully solved (`0x1b41bbca` cracked,
+   DEFLATE standard, all CRCs reproduced). Write `mst9u_merge.py`'s repacker and
+   prove a byte-identical round-trip, then do the `unplg` fix. The no-signal
+   colour needs the renderer located first (string-less; data-flow trace — see
+   feature-targets.md (a)).
 3. **Linux custom code** — pick AM8250 or RTD1295 for streaming once one of them
    is confirmed rebuildable and we've checked for extra on-device signature
    checks.

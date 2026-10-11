@@ -55,6 +55,7 @@ decompiled/      hand-decompiled C for reading (not buildable, not verified)
 | `tools/act_unpack.py` | Split `ACTUPGRADE.bin` into its component records | working |
 | `tools/strsearch.py` | Search blobs for text in ASCII/UTF-16LE/UTF-16BE | working |
 | `tools/mst9u_strings.py` | Dump scaler menu text (glyph-index encoded) and plain ASCII strings to TSV | working |
+| `tools/aeon-ghidra/` | Containerised headless Ghidra + AEON R2 plugin: disassemble/decompile/assemble the MStar scaler core, exhaustive-disassembly and string-naming scripts | working (see its README) |
 | `tools/nxp_disasm.py` | Recursive-descent Thumb disassembly of the NXP MCU image (needs `capstone`) | working |
 | `tools/nxp_trace.py` | Condense that listing into per-function GPIO/delay/call traces | working |
 | `tools/nxp_initdata.py` | Decompress the NXP app's `.data` initialisers | working |

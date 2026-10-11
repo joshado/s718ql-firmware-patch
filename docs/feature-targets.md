@@ -6,7 +6,7 @@ disassembly needed, "code edit" = needs the target's ISA.
 
 | # | Goal | Lives in | Type | Difficulty |
 |---|---|---|---|---|
-| a | Change no-input-source background colour | Scaler (MST9U) | data/config edit | medium |
+| a | Change no-input-source background colour | Scaler (MST9U) | locate (code trace) + data/code edit | medium–high |
 | b | Fix `unplg`→`unplug` shutdown typo | Scaler string table | data edit | low–medium |
 | c | Root on the two Linux images | AM8250 + RTD1295 | fs edit + repack | **low** |
 | d | Remote power-on for Home Assistant | NXP MCU + AM8250 | code/daemon | high |
@@ -216,13 +216,18 @@ recoverable.
 
 ## Cross-cutting next steps
 
-1. Write `tools/mst9u_strcipher.py` (encode/decode the additive-shift OSD text)
-   and a string-table locator → unblocks (a) and (b).
+1. ~~Write `tools/mst9u_strcipher.py` (additive-shift OSD text)~~ **DONE/revised**
+   — the OSD text is glyph-index encoded, not a cipher; `tools/mst9u_strings.py`
+   decodes it. Still needed for (b): a string-table/offset locator to handle a
+   length-changing edit.
 2. ~~Solve the scaler header field `0x1b41bbca`~~ **DONE** — it is CRC-32-MSB
    over `[0x20080..0xa9cf9)` (see rebuilding.md). Scaler repack is unblocked.
-3. Write `tools/act_repack.py` and prove a byte-identical round-trip → unblocks
+3. Write the `MERGE.bin` repacker (in `mst9u_merge.py`) and prove a byte-identical
+   round-trip → unblocks scaler data edits (a/b).
+4. Write `tools/act_repack.py` and prove a byte-identical round-trip → unblocks
    (c) and (d) on the AM8250.
-4. Load the NXP and Nuvoton images into Ghidra (both are stock Cortex-M) → start
-   on (d) and (f) at the source level.
-5. Get `rootfs.ext4.bin` (RTD1295) open with a current extractor → unblocks the
+5. ~~Load the NXP image into Ghidra~~ **DONE** — NXP fully disassembled and
+   decompiled (`decompiled/nxp_app.c`, `docs/nxp-mcu.md`). Nuvoton M451 still to
+   do (also stock Cortex-M) for (d)/(f).
+6. Get `rootfs.ext4.bin` (RTD1295) open with a current extractor → unblocks the
    streaming home for (c).

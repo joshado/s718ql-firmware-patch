@@ -66,9 +66,13 @@ stick" flow). Internally it's three pieces of code in one image: an 8051-based
 large main application ("AP") that runs the UI. Build stamp in this image:
 `Jun 29 2017` / later strings `Feb 02 2017`. CPU is MStar's proprietary **32-bit RISC core** ("risc32", the Aeon family;
 **confirmed** from the source path `./cpu/risc32/MST9U/interrupt.c` and the
-symbol `_HAL_SetAeon_SPIMappingAddr` — not stock ARM/MIPS). No stock
-disassembler exists for it, which is the main obstacle to code-level patching.
-See `docs/firmware-components.md` for the module/subsystem breakdown.
+symbol `_HAL_SetAeon_SPIMappingAddr` — not stock ARM/MIPS). A Ghidra processor
+module exists (`eb4x/ghidra-plugin-aeon`); we run it headless in
+`tools/aeon-ghidra/` to disassemble, decompile and assemble this core. The
+remaining obstacles to code-level patching are the lack of a C compiler for
+AEON (new logic = hand-written assembly) and flashing recovery, not the
+disassembler. See `docs/firmware-components.md` for the module/subsystem
+breakdown and tooling.
 
 ### 2. TI DLPC4422 — "DDP" on the Formatter board (DDP FW)
 **What a "formatter board" is:** in a DLP projector the imager is a **DMD**

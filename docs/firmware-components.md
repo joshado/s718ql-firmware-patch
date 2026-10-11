@@ -38,13 +38,13 @@ Parsed and checksum-verified by `tools/mst9u_merge.py`. Layout:
 | **AP blob prefix** | `0x020080`–`0x023880` | **uncompressed** 0x3800 bytes: exception vectors, image info header at +0x1100 (see below), a resource table tagged `TEL` at +0x2000 |
 | **AP DEFLATE stream** | `0x023880`–`0x0a9cf3` | raw DEFLATE → **0x181560 bytes** of ARM-ish MStar AP code + strings |
 | **AP size + CRC** | `0x0a9cf3` | u32 LE decompressed size, then u16 **CRC-16/CCITT-FALSE** (LE) over `[0x20080 .. end-of-stream)` |
-| **tail resources** | `0x0a9cf9`–EOF | referenced by the TEL table; includes a JPEG at `0xb9d08` (the boot/no-signal logo bitmap, *inferred*) |
+| **tail resources** | `0x0a9cf9`–EOF | referenced by the TEL table; includes the Dell-logo JPEG at `0xb9d08` (TEL type 0xc5, 2-tone, extracted to `firmware/unpacked/scaler/images/`; used as a mask for the no-signal screen — see feature-targets.md (a)) |
 | **Trailer** | EOF-12 | `55 AA AB CD` magic; **CRC-32** (poly 0x04C11DB7, MSB-first, init 0, no final XOR) over everything before the last 4 bytes, stored **big-endian** |
 
 Header u32s at 0x10000 (LE): `ap_flash_start=0x20080`, `ap_ram_start=0x180000`,
-`ap_ram_end=0x209c79`, `ap_flash_end=0xa9cf9`, `0`, `0x1b41bbca` (unknown — a
-second checksum/signature over the AP?), `0`, `0`, `filesize-4=0x167a28`,
-`0x10000`.
+`ap_ram_end=0x209c79`, `ap_flash_end=0xa9cf9`, `0`, `0x1b41bbca` (**solved** —
+CRC-32-MSB over the AP flash region `[0x20080..0xa9cf9)`; see below), `0`, `0`,
+`filesize-4=0x167a28`, `0x10000`.
 
 **Image info header** (AP prefix +0x1100, i.e. `MERGE.bin` `0x21180`, 0x50
 bytes; earlier notes called this the "panel-info record"). It identifies the
@@ -62,13 +62,17 @@ build and repeats two sizes; it does **not** hold display timings.
 | +0x4A | `79 9C 08 00` | `0x89C79` = AP length in flash (`0xA9CF9` − `0x20080`) |
 | +0x4E | `00 38` | `0x3800` = size of the uncompressed prefix |
 
-Because it carries the image's own sizes, include it when trying to explain
-the header field `0x1b41bbca`.
+**All three integrity fields are reproduced** — no unknowns remain:
+- AP **CRC-16/CCITT-FALSE** `0x679f` over `[0x20080 .. stream_end)`;
+- header[5] **CRC-32** (MSB-first, poly `0x04C11DB7`, init 0, no XOR) = `0x1b41bbca`
+  over the AP flash region `[0x20080 .. 0xa9cf9)` — the field formerly marked
+  "unknown", now cracked (same CRC family as the trailer);
+- trailer **CRC-32** `0x2d384606` (same algorithm, stored big-endian) over
+  everything but the last 4 bytes.
 
-**Both integrity checks are reproduced** (CRC-16 `0x679f` and CRC-32
-`0x2d384606` both recompute correctly). The one still-unexplained field is
-`0x1b41bbca` in the header — likely an AP-region check; needs confirming before
-repacking (see rebuilding doc).
+The AP deflate stream is **standard raw DEFLATE** (Python `zlib -15` inflates it
+to our exact `ap_decompressed.bin`), so it can be regenerated. See
+[rebuilding.md](rebuilding.md) §1 for the full repack recipe.
 
 **Strings of interest** (all in the decompressed AP): OSD menu text, `Dell
 S718QL`, keystone (`dvOmnitek_*Keystone_Write` → an **Omnitek** warp block),
@@ -80,16 +84,20 @@ upgrade engine (`MW_UsbDownload_*`, `MERGE.BIN`, `Merge2.bin`).
 
 The first ~832 KB of the decompressed AP, split out as
 `firmware/unpacked/scaler/ap_code.bin` for inspection. High-level structure,
-from debug strings and statistics (no disassembler for this core yet):
+from debug strings and statistics (and now a working disassembler/decompiler —
+see "Tooling for this core" below):
 
 **CPU — confirmed.** MStar's proprietary **32-bit RISC core** ("risc32", the
-Aeon family). Evidence in the image: the source path
+AEON family). Evidence in the image: the source path
 `./cpu/risc32/MST9U/interrupt.c`, the symbol `_HAL_SetAeon_SPIMappingAddr`,
-and `Sboot Chip ID`. Not ARM/MIPS; no stock disassembler. Absolute 32-bit
-pointers are rare in the code (~1% of aligned words fall in the AP RAM range),
-i.e. the core builds addresses from immediate pairs (hi/lo) rather than a
-literal pool — typical of this RISC. That is the main obstacle to code-level
-patching.
+and `Sboot Chip ID`. Not ARM/MIPS. Absolute 32-bit pointers are rare in the
+code (~1% of aligned words fall in the AP RAM range), i.e. the core builds
+addresses from immediate pairs (`movhi`+`addi`/`ori`) rather than a literal
+pool — typical of this RISC. We now have a disassembler, decompiler **and
+assembler** for it (`tools/aeon-ghidra/`); the remaining obstacles to
+code-level work are the lack of a C **compiler** for AEON (new logic must be
+hand-written assembly) and that AEON pointer references need our own resolution
+pass, not the "no disassembler" problem noted earlier.
 
 **It is an MStar "monitor_ap" application.** Source paths and log tags reveal a
 layered build (vendor framework, not a general-purpose OS):
@@ -119,7 +127,9 @@ MStar cmds(...)vcp(...)mccs_ver(2.1)`) and a panel id `MST9U3_PanelCMIM236HGJ_L2
 (AEON R2, OpenRISC-derived), and there is public RE support:
 
 - **`eb4x/ghidra-plugin-aeon`** (Apache-2.0) — a Ghidra SLEIGH processor module
-  for AEON R2. Variants `AEON:LE:32:R2` / `BE:32:R2` / `R2-harvard`. Integer
+  for AEON R2. The README lists LE/BE/harvard variants, but the **shipped v0.1.0
+  release only contains `AEON:BE:32:R2`** (what we use; AEON instructions are
+  big-endian regardless). Integer
   core, branches, loads/stores, `movhi` and system instructions have real
   p-code; MAC/DSP/SIMD/float/cache decode (right length + operands) but are
   pseudo-ops. The author reports it decodes **"the MST9U main firmware"** with
