@@ -1,0 +1,6 @@
+# DIAGNOSTIC: NOP osd_nosig_draw's own logo draw so the cave's icon (drawn at the
+# same GRAM slot 0x20) survives. The logo draw is `b.jal 0x21c925` at 0x1dbca3
+# (e4081904); replace with two `b.movi r0,0x0` NOPs (9800 9800). Size-neutral (4B).
+# The surrounding flag set/clear and arg setup still run harmlessly.
+# Format: RAM_addr  expect_hex  replace_hex  (RAM = 0x183800 + dec_offset).
+0x1dbca3 e4081904 98009800

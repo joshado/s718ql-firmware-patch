@@ -1,0 +1,40 @@
+# DIAGNOSTIC build: prove the osd_nosig_draw cave actually executes (and does so
+# persistently) by having the CAVE draw the "?" icon bitmap (osd_nosig_icon_bmp,
+# 0x2a74d8) into the LOGO GRAM slot (index 0x20, screen-centre). Paired with a
+# size-neutral data patch that NOPs osd_nosig_draw's own logo draw
+# (feature-a-diag-nop-logo.txt) so the cave's glyph is not overwritten.
+#
+# 3-way outcome at screen centre:
+#   "?" icon   -> cave executed (this build, v3-diag)
+#   blank      -> cave did NOT execute (logo NOPed, nothing redrew it)
+#   Dell logo  -> an older build is still flashed (neither patch present)
+#
+# Replicates osd_nosig_draw's own draw sequence: set write-enable flag
+# uRam00307bb8 (0x307bb8) = 1, osd_gram_write_rle(0x20, 0x2a74d8, 0), flag = 0.
+# r10 = 0x300000 base for the flag store. Then restores r9/r10, runs the 3
+# displaced prologue instrs, returns to 0x1dbc8c. No colour write this round.
+@0x182048
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.movhi r10,0x30
+b.movi r7,0x1
+b.sb 0x7bb8(r10),r7
+b.ori r3,r0,0x20
+b.movhi r4,0x2a
+b.addi r4,r4,0x74d8
+b.movi r5,0x0
+b.jal 0x21c925
+b.sb 0x7bb8(r10),r0
+b.lwz r9,0x4(r1)
+b.lwz r10,0x0(r1)
+b.addi r1,r1,0x8
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.j 0x1dbc8c
+# --- hook site: exactly 8 bytes (0x1dbc84..0x1dbc8c), b.j + two r0 nops ---
+@0x1dbc84
+b.j 0x182048
+b.movi r0,0x0
+b.movi r0,0x0
