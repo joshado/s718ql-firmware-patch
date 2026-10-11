@@ -53,27 +53,43 @@ shows null separators between messages, which is promising.
 
 ## (a) No-input-source background colour
 
-**Partially located.** The scaler is what paints the screen when there's no
-signal. Relevant AP strings: `[msScalerAP] Enable Frame Color`, a
-`Def*_RedColor/GreenColor/BlueColor` set (colour-temperature defaults), and the
-whole **logo-capture** subsystem (`USER_PREF_SYS_DRAW_BMP_LOGO`, `Mute BMP
-Logo`, `initScanLogoCapture`). The painfully-bright-blue "no source" field is
-most likely either (1) a fixed "**frame colour**" / free-run background the
-scaler outputs when it loses sync, or (2) a blue muted-screen fill.
+**Subsystems located; exact colour value not yet pinpointed.** From the AEON
+disassembly/decompile (`tools/aeon-ghidra/`) and the string dump:
 
-**Open:** find the constant that sets that specific blue. Two sub-paths to
-check:
-- A hard-coded RGB/colour value fed to "Enable Frame Color" / the free-run
-  background register — a data edit once found.
-- A user-preference default (the `USER_PREF_SYS_*` block) — possibly even
-  changeable without reflashing if it's exposed via a service menu / RS232
-  command.
+- The blue "no signal" field + Dell logo is the scaler's **no-source / mute
+  screen**. Two mechanisms are present:
+  - a **"Frame Color" / free-run background** — string `[msScalerAP] Enable
+    Frame Color` at RAM `0x2aacf9`; this is the solid field the scaler outputs
+    with no sync;
+  - a **logo/mute-screen** subsystem — `Mute BMP Logo!` (`0x2b013e`),
+    `initScanLogoCapture`/`setLogoCapture`, and user prefs
+    `USER_PREF_SYS_DRAW_BMP_LOGO`, `USER_PREF_SYS_LOGOCAPTURE`,
+    `USER_PREF_SYS_LOGOASPECT`.
+- The **Dell logo** is the JPEG at `MERGE.bin` `0xb9d08` (292×292, extracted to
+  `firmware/unpacked/scaler/images/`). It is drawn *on top of* the background;
+  replacing/removing it is a pure **data edit**.
+- The `DefCool/DefNormal/DefWarm/DefsRGB_{Red,Green,Blue}Color` values are
+  **colour-temperature picture gains**, not the background — a red herring.
 
-*Next step:* trace "Enable Frame Color" and the mute-screen fill to their colour
-argument. This may need light disassembly of the MST9U AP (the hard ISA), unless
-the value sits in an obvious config table near the `Def*Color` strings.
+**Why the exact colour isn't pinned yet:** Ghidra did not disassemble/resolve
+the code that references `Enable Frame Color` (no construction of `0x2aacf9`
+appears in the listing), a consequence of the AEON data-pointer reference gap
+(see firmware-components.md) plus a few uncovered functions. There is no
+`FreeRun`/`Background`/`MuteColor` string to anchor on either. Finding the RGB
+constant / register write means **manual tracing** from the no-signal state
+machine to the fill — on the order of hours, and the main cost of this feature.
 
----
+**Feasibility verdict:**
+- *Changing* the colour once located: **easy** — a small data or in-place code
+  patch, then repack+re-sign (all container gates now solved; assembler works).
+- *Locating* it: **medium-hard** — manual AEON tracing; the automated string
+  resolution doesn't cover the data pool.
+- *Possible shortcuts:* (1) it may be a **free-run/mute colour register** whose
+  value is reachable by tracing the no-signal handler; (2) the logo prefs are
+  `USER_PREF_SYS_*`, so a **service-menu / RS232 / I²C setting** might change
+  background/logo behaviour **without reflashing** — worth checking the menu and
+  command handlers first; (3) replacing the **logo JPEG** is trivial if that
+  alone suffices.
 
 ## (c) Root on the two Linux systems — genuinely easy
 
