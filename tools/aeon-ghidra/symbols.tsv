@@ -1,54 +1,11 @@
 # Curated symbol table for the MStar MST9U (AEON) scaler AP.
-# !!! STALE: these addresses were derived with the wrong load base (decompressed
-# at 0x180000). The correct base is the COMBINED image (prefix+decompressed) at
-# 0x180000, i.e. function addresses here are ~0x3800 LOW. Rebuild against a fresh
-# regen.sh dump before trusting. Kept for reference only.
 # Our own annotations (not vendor symbols) — edit freely and re-run regen.sh.
 # Format:  addr <TAB> kind(func|data) <TAB> name <TAB> comment(optional)
-# Addresses are RAM (image loaded at 0x180000). Applied AFTER the auto namer,
-# so these override NameFromStrings guesses. Confidence noted in comments:
-# [C]=confirmed in code, [I]=inferred, [?]=tentative.
+# Addresses are RAM, image = COMBINED (ap_prefix.bin + ap_decompressed.bin) at
+# 0x180000 (i.e. the inflated stream sits at 0x183800). Applied after the auto
+# namer so these override it. Confidence: [C]=confirmed [I]=inferred [?]=tentative.
 #
-# ---- OSD string / i18n engine (see docs/firmware-components.md) ----
-0x00219504	func	osd_render_glyph_string	[C] glyph renderer: (win,str_ptr,len,...) -> draws OSD text
-0x00219f10	func	osd_render_glyph_string_v2	[?] sibling renderer used by one screen path
-0x001e4aea	func	fn_1e4aea_dead	[?] reads 0x2a9974 (a STRING region) as a pointer table -> likely DEAD/debug code, not the real renderer; earlier "master table" model was unsound
-0x001e49e1	func	fn_1e49e1	[?] touches osd_strtbl_a; role unclear
-0x001e4a5e	func	fn_1e4a5e	[?] indexes osd_strtbl_b by language*8; role unclear
-0x001e4aa4	func	fn_1e4aa4	[?] indexes osd_strtbl_a by language*8; role unclear
-0x001e9d6d	func	osd_show_ascii_as_id	[C] copies an ASCII string via ascii_to_glyph, renders with a msg id
-0x001e9942	func	ascii_to_glyph	[I] per-char ASCII -> OSD glyph-index transform
-0x001e9f2d	func	osd_msg_by_source	[C] picks a per-source label (g_src_type 0x01/02/03/05), shows id 0xde
-0x001e9de9	func	osd_msg_sel_f5_d0	[?] picks id 0xf5/0xd0 by g_osd_state==0x11
-0x001ea0c7	func	osd_msg_sel_f0_c2	[?] picks id 0xf0/0xc2 by g_osd_state==0x11
-0x001c7c3d	func	osd_state_debug_dump	[C] prints many state fields with labels (incl "Mute BMP Logo!")
-0x001c59a3	func	dbg_printf	[I] logger: (fmt_str, value)
-#
-# ---- OSD state / tables ----
-0x00307b98	data	g_osd_mode	[C] OSD state/mode byte (176 writers; read as ==0x11/0x19 by msg wrappers). NOT confirmed as a "screen id" into a master table (that model was unsound)
-0x002d0a34	data	p_scaler_state	[C] pointer to the scaler/window state struct (+0x47b=language, +0x45d=window idx)
-0x0030f6d8	data	g_window_info	[I] per-window info array, stride 0x84; [0]=current input/source type
-0x00304d14	data	g_osd_string_base	[C] set to 0x2da620 before rendering
-0x002da620	data	osd_string_region	[C] OSD string-region BASE. ALL menu text is accessed as this base + offset (no code addresses 0x2e4000+ directly) -> why string refs are never found directly
-0x0030574c	data	g_osd_small_font	[?] engine picks 0x12/0x18 glyph height from this
-0x002e8998	data	osd_strtbl_a	[?] (ptr,len) chain, entries point mid-message; exact structure unclear (not clean per-language screens)
-0x002e95b4	data	osd_strtbl_b	[?] referenced by 0x1e4a5e; not a clean (ptr,len) table
-0x002e9654	data	osd_strtbl_nosig1	[?] (ptr,len) chain near the no-signal strings; linkage to a renderer NOT established
-0x002e99b0	data	osd_strtbl_nosig2	[?] (ptr,len) chain over Es/Fr/De no-signal strings; renderer linkage NOT established
-#
-# ---- strings of interest (code refs not all found) ----
-0x002aacf9	data	str_enable_frame_color	[C] "[msScalerAP] Enable Frame Color" (referencing code NOT located)
-0x002b013e	data	str_mute_bmp_logo	[C] "Mute BMP Logo!"
-0x002ecd94	data	str_nosignal_hdmi1_en	[C] "No HDMI 1 (2.0) signal. Press <Source> to switch input." (English)
-#
-# ---- OSD screen/message renderers (the 12 functions that set osd_string_region) ----
-# They render OSD screens; dispatched INDIRECTLY (no direct callers, no raw
-# function pointers -> computed jump/switch, unresolved). The no-signal screen
-# is among these; the blue background fill is in their (unfound) caller.
-0x001e4828	func	osd_screen_1e4828	[?] OSD renderer (sets osd_string_region)
-0x001e99ab	func	osd_screen_1e99ab	[?] OSD renderer; branches on g_osd_mode==0x19
-0x001e9c40	func	osd_show_glyph_fields	[?] OSD render helper (string + fields); called by several screens
-0x001e9e87	func	osd_screen_1e9e87	[?] OSD renderer (shows id 0xe8)
-0x001ea2f4	func	osd_screen_1ea2f4	[?] OSD renderer -> osd_show_glyph_fields(4,0x70,..)
-0x001ea3c8	func	osd_screen_1ea3c8	[?] OSD renderer; branches on g_osd_mode!=0x02 -> osd_show_glyph_fields(9,0xc0,..)
-0x001ea882	func	osd_screen_1ea882	[?] OSD renderer (PQ debug dump path)
+# RESET 2026-10-11: emptied after the load-base fix (prior entries were 0x3800
+# low). Rebuild from fresh regen.sh dumps / the auto tsv. A few base-fixed
+# anchors below, re-derived on the correct base:
+0x0021cd04	func	osd_render_glyph_string	[C] glyph renderer (was 0x219504 pre-fix, +0x3800)
