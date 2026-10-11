@@ -215,6 +215,40 @@ samples). Boundaries are on 16 KB steps and the table labels are guesses.
 The header's RAM range (`0x180000`–`0x209C79`) is far smaller than this blob,
 so those fields do not simply describe where the whole AP sits. Unexplained.
 
+### OSD string engine / i18n (how menu text is reached from code)
+
+The OSD text is **not referenced by address** from code — a constant-fold over
+the full-coverage disassembly finds only ~6 direct references into the whole
+48 KB menu block, none to the user-visible messages. Instead strings are reached
+through a **per-language indexed engine** (confirmed in code):
+
+- A global **current-language** byte lives at `state_struct[+0x47b]`, where
+  `state_struct = *(u32*)(0x2d_global + 0xa34)` (the same state struct the mute
+  debug-dump reads).
+- Each on-screen "screen"/message has a **per-language table** of 8-byte
+  entries `(u32 string_ptr, u16 id, u16 pad)`, indexed by the language byte
+  (`language << 3`). Example table at RAM `0x2e8998`; entries point to the
+  matching language's glyph string in the menu block.
+- The message wrappers set a common base `0x2da620` into global `0x304d14`
+  (`b.movhi 0x2e; b.addi -0x59e0`), load `table[language]`, and call the shared
+  **show function `0x219504`** with the string pointer + an id/selector.
+- There are ~8 callers of `0x219504` (the screen wrappers), e.g. around
+  `0x1e49e1`, `0x1e4b75`, and a cluster `0x1e9a69`-`0x1e9dd1` that looks like the
+  source/no-signal message set (5 nearby calls).
+
+Layout confirms the parallel-language design: the no-signal screen is stored as
+consecutive per-language sub-blocks (En `0x2ecd94`, Es `0x2eceb0`, Fr `0x2ecffc`,
+De `0x2ed162`…), each with the same structure (4 source messages + "Searching" +
+HDMI labels + "Please wait").
+
+**For feature (a):** the no-signal *renderer* can be reached this way — find the
+wrapper whose table points at the no-signal sub-blocks (ID/selector still to be
+pinned; the per-language table for that screen did not resolve by a simple
+pointer scan), then trace ITS callers back to the no-signal detection handler,
+which is where the blue background fill lives. This needs decompiling
+`0x219504` + the wrapper cluster under full coverage (sweep boundaries make that
+fiddly) — a multi-step trace, but the mechanism is now understood.
+
 ### Menu text encoding (important for features a & b)
 
 Menu/OSD strings are **not obfuscated**. They are stored as **glyph indices
