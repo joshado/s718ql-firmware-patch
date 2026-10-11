@@ -38,6 +38,7 @@ docker run --rm --platform linux/amd64 \
   -scriptPath /opt/scripts \
   -postScript DisassembleCodeRegion.java "$dstart" "$dend" \
   -postScript AeonResolvePointers.java \
+  -postScript AeonFoldRefs.java \
   -postScript DefineStrings.java \
   -postScript NameFromStrings.java "/out/scaler_symbols_auto.tsv" \
   -postScript ApplySymbols.java /opt/aeon/symbols.tsv \
