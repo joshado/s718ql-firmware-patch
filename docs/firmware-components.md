@@ -250,6 +250,13 @@ selects the string. The `(ptr, len)` entries chain (`ptr[i]+len[i] == ptr[i+1]`)
 Sibling renderers `0x1e4a5e`/`0x1e4aa4` hardcode a specific table
 (`0x2e95b4` etc.).
 
+The **master screen table** base is resolved: `osd_render_screen` does
+`movhi 0x2b; addi -0x668c` -> **`0x2a9974`**, then `*(0x2a9974 + screen_id*4)`
+-> per-screen table, `[language*8]` -> `(ptr,len)`. **Open puzzle:** `0x2a9974`
+lands mid-string and no valid table entries appear at `0x2a9974 + sid*4` for
+`sid` 0..0xff, so either the structure is more complex or this function's
+boundaries are off from the sweep. Not resolved.
+
 The **no-signal message tables** are located: two 6-entry `(ptr,len)` runs at
 RAM `0x2e9654` (strings `0x2ec6e0..0x2ece52`) and `0x2e99b0`
 (`0x2ece84..0x2ed1ad`, the Es/Fr/De "No signal… Press Source…" strings).

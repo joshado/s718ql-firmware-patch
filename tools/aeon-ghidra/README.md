@@ -70,6 +70,18 @@ the debug strings they reference (PQ/GPO timing, `MONITOR_FLAGS`,
 `USER_PREF_WIN_SEL`, panel power-off, SERFLASH, …). `scaler_symbols.tsv` is the
 per-function record. The rest stay `FUN_ram_*`.
 
+**Quantified opportunity — a proper AEON constant-reference pass.** A linear
+`movhi`+`addi`/`ori` fold over the listing resolves **359 functions** that
+reference a string (21,155 pointer constructions); Ghidra's current analysis
+(SymbolicPropogator in `AeonResolvePointers.java`) only gives `NameFromStrings`
+**~48**. Porting that fold into a Ghidra pass that *creates references + defines
+strings + labels* (before `NameFromStrings`) would raise auto-naming ~7.5x and
+make the whole dump far more readable. This is the highest-leverage tooling
+improvement. (It does **not** by itself crack the no-signal trace: there the
+constant is already resolved — see the `0x2a9974` puzzle in
+firmware-components.md — the block is data-structure interpretation + sweep
+boundary quality.)
+
 **Why not more — the AEON reference gap.** Ghidra ships no constant-reference
 analyzer for AEON, and `SymbolicPropogator` does not recover the `b.movhi`+
 `b.addi` split-immediate pointers either, so the decompiler only folds a
