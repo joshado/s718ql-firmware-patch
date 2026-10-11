@@ -6,7 +6,7 @@ Known layout (M0R005):
   0x010000  header, u32 LE: ap_flash_start, ap_ram_start, ap_ram_end, ap_flash_end,
             0, <unknown 0x1b41bbca>, 0, 0, file_size-4, 0x10000
   0x010000+ sboot (loader, contains zlib inflate)
-  0x020080  AP blob: 0x3800 bytes uncompressed (exception vectors, panel info at
+  0x020080  AP blob: 0x3800 bytes uncompressed (exception vectors, image info header at
             +0x1100, resource table "TEL" at +0x2000), then a raw deflate stream
             (0x23880), then u32 LE decompressed size, then CRC-16/CCITT-FALSE (LE)
             over [ap_flash_start, end of deflate stream)

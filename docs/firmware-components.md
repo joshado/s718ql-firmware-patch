@@ -35,7 +35,7 @@ Parsed and checksum-verified by `tools/mst9u_merge.py`. Layout:
 | **PM / 8051 code** | `0x000000`–`0x010000` | standby power-management core |
 | **Header** | `0x010000` | 10×u32 LE (see below) |
 | **sboot (loader)** | `0x010000`–`0x020080` | contains the zlib/inflate used to unpack the AP; build stamp `Feb 02 2017 11:27:01` at 0x20060 |
-| **AP blob prefix** | `0x020080`–`0x023880` | **uncompressed** 0x3800 bytes: exception vectors, panel-info record at +0x1100 (`L-QMD55MWWAC-3333`, `PANEL_NAME`), a resource table tagged `TEL` at +0x2000 |
+| **AP blob prefix** | `0x020080`–`0x023880` | **uncompressed** 0x3800 bytes: exception vectors, image info header at +0x1100 (see below), a resource table tagged `TEL` at +0x2000 |
 | **AP DEFLATE stream** | `0x023880`–`0x0a9cf3` | raw DEFLATE → **0x181560 bytes** of ARM-ish MStar AP code + strings |
 | **AP size + CRC** | `0x0a9cf3` | u32 LE decompressed size, then u16 **CRC-16/CCITT-FALSE** (LE) over `[0x20080 .. end-of-stream)` |
 | **tail resources** | `0x0a9cf9`–EOF | referenced by the TEL table; includes a JPEG at `0xb9d08` (the boot/no-signal logo bitmap, *inferred*) |
@@ -45,6 +45,25 @@ Header u32s at 0x10000 (LE): `ap_flash_start=0x20080`, `ap_ram_start=0x180000`,
 `ap_ram_end=0x209c79`, `ap_flash_end=0xa9cf9`, `0`, `0x1b41bbca` (unknown — a
 second checksum/signature over the AP?), `0`, `0`, `filesize-4=0x167a28`,
 `0x10000`.
+
+**Image info header** (AP prefix +0x1100, i.e. `MERGE.bin` `0x21180`, 0x50
+bytes; earlier notes called this the "panel-info record"). It identifies the
+build and repeats two sizes; it does **not** hold display timings.
+
+| Offset | Bytes | Reading |
+|---|---|---|
+| +0x00 | `78 56 AA 55` | magic `0x55AA5678` |
+| +0x0C | `B9 14 00 00` | `0x14B9`, unknown |
+| +0x14 | `01 00 01 00 01 00` | three u16 = 1, unknown |
+| +0x1A | `DC FE 09 00` | `0xFEDC`, 9, unknown |
+| +0x1E | `L-QMD55MWWAC-3333` | model/board identifier of this build |
+| +0x32 | `PANEL_NAME` | literal placeholder, never filled in |
+| +0x47 | `BE AD DE` | part of a `0xDEADBE..` marker |
+| +0x4A | `79 9C 08 00` | `0x89C79` = AP length in flash (`0xA9CF9` − `0x20080`) |
+| +0x4E | `00 38` | `0x3800` = size of the uncompressed prefix |
+
+Because it carries the image's own sizes, include it when trying to explain
+the header field `0x1b41bbca`.
 
 **Both integrity checks are reproduced** (CRC-16 `0x679f` and CRC-32
 `0x2d384606` both recompute correctly). The one still-unexplained field is
