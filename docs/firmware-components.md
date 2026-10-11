@@ -144,20 +144,23 @@ absolute pointers" pattern seen above.
 **Tooling is set up.** `tools/aeon-ghidra/` runs this plugin in headless Ghidra
 via Docker (`build.sh` then `run.sh <binary>`); no host JDK/Ghidra needed. A
 verified run over `ap_decompressed.bin` gave **64,525 instructions / 956
-functions** of clean AEON code. Note the shipped plugin only has the
-**`AEON:BE:32:R2`** language (instructions are big-endian anyway); load at base
-**`0x180000`** (the header's `ap_ram_start`). The
-first `0x89C79` is code+data; the reset/exception vectors are at the start of
-the AP prefix (`0x180100`). The DSP/SIMD pseudo-ops and the unresolved mapping
-of the later tables (below) are the known gaps.
+functions** of clean AEON code. The C **decompiler** also works, via an amd64
+image under emulation (`tools/aeon-ghidra/decomp.sh`). Note the shipped plugin
+only has the **`AEON:BE:32:R2`** language (instructions are big-endian anyway);
+load at base **`0x180000`** (the header's `ap_ram_start`). The reset/exception
+vectors are at the start of the AP prefix (`0x180100`). The DSP/SIMD pseudo-ops
+and the unresolved table mapping (below) are the known gaps.
 
-**Memory map is only partly understood.** The header's AP RAM range
-(`0x180000`–`0x209C79`, `0x89C79` bytes) is far smaller than the decompressed
-blob (`0x181560`), and the pointer-like words cluster inside exactly that range.
-So the first ~`0x89C79` is the live code+data loaded at `0x180000`, and the
-later regions (tables at `0x124000`+, menu text at `0x164000`+, fonts) are
-addressed some other way. How those map into the core's address space is not
-yet resolved; it matters for interpreting any table offset.
+**Memory map — refined by the disassembly.** The whole decompressed blob maps
+contiguously from `0x180000` (file offset `N` → RAM `0x180000 + N`): the
+`b.movhi`+`b.addi` address pairs reach data at e.g. `0x309F84`, past the image
+end (`0x301560`) into BSS. So the earlier reading — that only the first
+`0x89C79` was "live" — was wrong; that range (the header's AP RAM end
+`0x209C79`) is just the initialised code+data, with the tables (`0x124000`+),
+menu text (`0x164000`+) and fonts continuing in the same flat space and BSS
+beyond the image. Exact confirmation (and whether any region is relocated) is
+follow-up work with the disassembly, but table offsets can now be read as
+`0x180000 + file_offset`.
 
 ### Layout of the decompressed AP (`ap_decompressed.bin`, 0x181560 bytes)
 
