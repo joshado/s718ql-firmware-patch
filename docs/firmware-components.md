@@ -161,16 +161,16 @@ load at base **`0x180000`** (the header's `ap_ram_start`). The reset/exception
 vectors are at the start of the AP prefix (`0x180100`). The DSP/SIMD pseudo-ops
 and the unresolved table mapping (below) are the known gaps.
 
-**Disassembly coverage.** Ghidra's default AEON auto-analysis follows only
-entry-reachable flow and disassembled just ~35% of the code (64,525 insns / 956
-functions). `tools/aeon-ghidra/scripts/DisassembleCodeRegion.java` fills the gaps
-by linear-sweeping the code region, taking it to **232k instructions / 2,690
-functions** — effectively full code coverage, which is what the string/reference
-search needs. Caveat: the blind sweep also disassembles data regions as junk
-instructions and can mis-set some function boundaries, so the **decompiler** is
-best pointed at a specific function from the default flow-reachable analysis;
-use the swept listing for reference/location work (my Python fold over the
-listing), not for clean whole-program decompilation.
+**Disassembly coverage (flow-based).** `tools/aeon-ghidra/scripts/AeonFlowDisasm.java`
+discovers code by flow, not by blind sweep: it finds function entries by AEON
+**prologue** (`b.addi r1,r1,-N` + `b.sw D(r1),r9`, checked with the
+pseudo-disassembler) and by **call-target closure**, following flow for correct
+boundaries. Result: **956 -> 2,532 functions, ~516 KB** of real code, with no
+data-as-code junk (the older blind sweep reached 722 KB but mis-disassembled
+data and mangled boundaries). The full named dump is `decompiled/scaler_app.c`;
+regenerate with `tools/aeon-ghidra/regen.sh` after editing `symbols.tsv`. A
+proper AEON constant-reference pass (`AeonFoldRefs.java`) runs in the pipeline
+and roughly doubles the functions with string evidence (48 -> ~102).
 
 **Symbol recovery (partial).** `tools/aeon-ghidra/analyze.sh` names functions
 from the debug strings they reference. Yield is low — ~10 auto-named, ~37
