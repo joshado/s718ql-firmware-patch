@@ -50590,9 +50590,12 @@ LAB_ram_001c6415:
 
 
 
-/* ram:001be86b  FUN_ram_001be86b */
+/* ram:001be86b  osd_set_bg_color_332 */
 
-void FUN_ram_001be86b(int param_1,uint param_2)
+/* [C] set free-run/no-signal background colour. arg2 = packed 3-3-2 RGB (bits5-7=R,2-4=G,0-1=B):
+   0x03=blue 0xe0=red 0x1c=green 0xff=white 0x00=black. writes frame-colour reg 0x90102f33 */
+
+void osd_set_bg_color_332(int param_1,uint param_2)
 
 {
   byte bVar1;
@@ -56419,7 +56422,7 @@ undefined1 FUN_ram_001c60f9(uint param_1)
 
 /* ram:001c6162  scaler_mmio_write_byte */
 
-/* [C] byte write to a scaler register: *(g_scaler_mmio_base + enc(reg)) = val */
+/* [C] byte write to a scaler register (base g_scaler_mmio_base) */
 
 void scaler_mmio_write_byte(uint param_1,undefined1 param_2)
 
@@ -56610,7 +56613,7 @@ uint FUN_ram_001c64a9(int param_1)
 
 /* ram:001c64ed  scaler_reg_write24 */
 
-/* [C] writes a 24-bit value (e.g. RGB colour) to reg,reg+1,reg+2 via scaler_mmio_write_byte */
+/* [C] write 24-bit value (RGB) to reg,reg+1,reg+2 */
 
 void scaler_reg_write24(int param_1,uint param_2)
 
@@ -57742,9 +57745,12 @@ void FUN_ram_001c6ead(int param_1,undefined4 param_2,undefined4 param_3,undefine
 
 
 
-/* ram:001c70ec  FUN_ram_001c70ec */
+/* ram:001c70ec  osd_set_frame_color_rgb */
 
-void FUN_ram_001c70ec(uint param_1,int param_2,int param_3)
+/* [C] set_frame_color(R,G,B) -> reg 0x90102f33 (24-bit). searching screen uses
+   (0xff,0xff,0xff)=white */
+
+void osd_set_frame_color_rgb(uint param_1,int param_2,int param_3)
 
 {
   byte bVar1;
@@ -75096,7 +75102,7 @@ void FUN_ram_001e175d(void)
               }
             }
             FUN_ram_001e3156(0x24);
-            FUN_ram_001be86b(1,0);
+            osd_set_bg_color_332(1,0);
             FUN_ram_001d10ac(2000);
             if (-1 < *(char *)(DAT_ram_002d0a34 + 1099)) {
               if ((bRam002cfe00 & 0x40) == 0) {
@@ -76474,7 +76480,7 @@ uint osd_no_input_handler(void)
           }
           else {
             g_osd_mode = '\x04';
-            FUN_ram_001be86b(0,0xff);
+            osd_set_bg_color_332(0,0xff);
           }
         }
         else {
@@ -76552,13 +76558,14 @@ uint osd_no_input_handler(void)
 
 
 
-/* ram:001e76f7  FUN_ram_001e76f7 */
+/* ram:001e76f7  osd_nosignal_color_cycle */
 
 /* WARNING: Control flow encountered bad instruction data */
 /* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
 /* WARNING: Exceeded maximum restarts with more pending */
+/* [C] cycles the no-signal bg colour (g_osd_mode==0x0d) through g_nosig_bg_colors */
 
-void FUN_ram_001e76f7(void)
+void osd_nosignal_color_cycle(void)
 
 {
   undefined1 *puVar1;
@@ -76669,12 +76676,13 @@ LAB_ram_001e776e:
     uVar4 = bRam003056fe + 1 & 7;
     bRam003056fe = (byte)uVar4;
     if (*(char *)(DAT_ram_002d0a34 + 0x45c) == '\0') {
-      FUN_ram_001be86b(0,*(undefined4 *)(&DAT_ram_002cf6e4 + uVar4 * 4));
+      osd_set_bg_color_332(0,*(undefined4 *)(&g_nosig_bg_colors + uVar4 * 4));
     }
     else {
       uVar4 = 0;
       do {
-        FUN_ram_001be86b(uVar4 & 0xff,*(undefined4 *)(&DAT_ram_002cf6e4 + (uint)bRam003056fe * 4));
+        osd_set_bg_color_332
+                  (uVar4 & 0xff,*(undefined4 *)(&g_nosig_bg_colors + (uint)bRam003056fe * 4));
         uVar4 = uVar4 + 1;
       } while (uVar4 != 4);
     }
@@ -79338,7 +79346,7 @@ LAB_ram_001ef1b0:
     uVar3 = bRam003056fe + 1 & 7;
     bRam003056fe = (byte)uVar3;
     if (*(char *)(DAT_ram_002d0a34 + 0x45c) == '\0') {
-      uVar3 = *(uint *)(&DAT_ram_002cf6e4 + uVar3 * 4);
+      uVar3 = *(uint *)(&g_nosig_bg_colors + uVar3 * 4);
       FUN_ram_001d11b0();
       uVar4 = (uint)uRam0030f6da;
       if (uVar4 != 0) {
@@ -79408,8 +79416,8 @@ LAB_ram_001c6415:
     }
     uVar3 = 0;
     do {
-      uVar1 = FUN_ram_001be86b(uVar3 & 0xff,
-                               *(undefined4 *)(&DAT_ram_002cf6e4 + (uint)bRam003056fe * 4));
+      uVar1 = osd_set_bg_color_332
+                        (uVar3 & 0xff,*(undefined4 *)(&g_nosig_bg_colors + (uint)bRam003056fe * 4));
       uVar3 = uVar3 + 1;
     } while (uVar3 != 4);
   }
@@ -82540,7 +82548,7 @@ void FUN_ram_001f386c(void)
       FUN_ram_001b4d19();
     }
     else {
-      FUN_ram_001e76f7();
+      osd_nosignal_color_cycle();
       FUN_ram_0020129a();
       thunk_FUN_ram_001f19f5();
       FUN_ram_001f1004();
@@ -92968,7 +92976,7 @@ void FUN_ram_00202710(void)
 undefined4 FUN_ram_002027b0(void)
 
 {
-  FUN_ram_001c70ec(0xff,0xff,0xff);
+  osd_set_frame_color_rgb(0xff,0xff,0xff);
   FUN_ram_00202710();
   scaler_setup_17b6();
   FUN_ram_001d3b54();
@@ -93081,7 +93089,7 @@ void Menu_InitAction(void)
               }
             }
             FUN_ram_001e3156(0x24);
-            FUN_ram_001be86b(1,0);
+            osd_set_bg_color_332(1,0);
             FUN_ram_001d10ac(2000);
             if (-1 < *(char *)(DAT_ram_002d0a34 + 1099)) {
               if ((bRam002cfe00 & 0x40) == 0) {

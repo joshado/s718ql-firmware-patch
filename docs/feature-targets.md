@@ -107,15 +107,17 @@ location cannot reach it.
   address** and its per-language table isn't statically locatable (computed at
   runtime from base+language+screen-id).
 
-**OSD model RESTORED + no-input screen IDENTIFIED (correct base).** The earlier
-retraction was the 0x3800 load-base bug, not a real flaw. With the combined
-image: the master table at `0x2a9974` resolves; `master[4]` is the no-signal
-screen (its English string `0x2f0594` = "No HDMI 1 (2.0) signal..."). So
-**g_osd_mode (0x307b98) == 4 is the no-input screen**. Five functions set it to
-4; the main handler is **`0x1e73fe`** (`osd_no_input_handler`) -- now readable,
-with scaler **register writes** visible (e.g. `scaler_reg_write(0x101d20,..)`).
-The blue background fill is among this handler's register-write calls -- the
-remaining step is identifying which register is the background/frame colour.
+**NO-SIGNAL BACKGROUND COLOUR FOUND.** The background is set by
+`osd_set_bg_color_332(window, packed)` (`0x1be86b`), writing the frame-colour
+register `0x90102f33`. `packed` is a **3-3-2 RGB** byte (bits5-7=R, 2-4=G,
+0-1=B): **`0x03` = blue (0,0,255)**, `0xe0`=red, `0x1c`=green, `0xff`=white,
+`0x00`=black. The no-signal screen cycles the 8-entry table **`g_nosig_bg_colors`
+(`0x2cf6e4`)** = [black, BLUE, purple, red, green, BLUE, cyan, magenta]; the
+blue is entries [1] and [5] (`0x03`). The white "searching" screen instead uses
+`osd_set_frame_color_rgb(0xff,0xff,0xff)`. **To change the blue:** edit the
+packed value(s) in `g_nosig_bg_colors` (RAM `0x2cf6e4`, combined-image file
+`0x14f6e4`) -- e.g. set the blue entries to another packed colour -- then repack
+(all container gates solved). A data edit, no code change.
 
 **Caveat — no colour-setting code has been found.** A "mute/frame-colour
 register" or colour field is a *hypothesis* (from the mask inference), **not a

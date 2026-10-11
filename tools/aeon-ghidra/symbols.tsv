@@ -36,3 +36,11 @@
 0x00307ba4	data	g_osd_substate	[?] OSD sub-state (compared ==2/3/4/6)
 0x00309f80	data	g_window_ctx	[I] per-window context array (stride 0x70); indexed in frame-color fn
 0x002cfd98	data	g_timer_cfd98	[?] set to 100 on signal loss
+#
+# ---- no-signal BACKGROUND colour (feature a) ----
+0x001be86b	func	osd_set_bg_color_332	[C] set free-run/no-signal background colour. arg2 = packed 3-3-2 RGB (bits5-7=R,2-4=G,0-1=B): 0x03=blue 0xe0=red 0x1c=green 0xff=white 0x00=black. writes frame-colour reg 0x90102f33
+0x001c70ec	func	osd_set_frame_color_rgb	[C] set_frame_color(R,G,B) -> reg 0x90102f33 (24-bit). searching screen uses (0xff,0xff,0xff)=white
+0x001e76f7	func	osd_nosignal_color_cycle	[C] cycles the no-signal bg colour (g_osd_mode==0x0d) through g_nosig_bg_colors
+0x002cf6e4	data	g_nosig_bg_colors	[C] 8 packed-3-3-2 no-signal background colours: [0]black [1]BLUE [2]purple [3]red [4]green [5]BLUE [6]cyan [7]magenta
+0x001c64ed	func	scaler_reg_write24	[C] write 24-bit value (RGB) to reg,reg+1,reg+2
+0x001c6162	func	scaler_mmio_write_byte	[C] byte write to a scaler register (base g_scaler_mmio_base)
