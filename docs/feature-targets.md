@@ -107,6 +107,19 @@ location cannot reach it.
   address** and its per-language table isn't statically locatable (computed at
   runtime from base+language+screen-id).
 
+**OSD render path fully mapped (progress on the message lead).** Decompiled:
+`0x219504` glyph renderer; `0x1e4aea` generic screen renderer doing
+`master_table[screen_id][language] -> (ptr,len) -> render`, where
+`screen_id = DAT_ram_00307b98`. The no-signal per-language string tables are
+located (`0x2e9654`, `0x2e99b0`). **Still blocked:** connecting the no-signal
+tables to a screen-id — no master pointer to those tables resolves (the master
+base in `0x1e4aea` was mis-resolved to a string label, and `0x307b98` has 176
+writers so the no-signal one can't be picked without its id). This is
+pointer-resolution imprecision from the blind-sweep coverage, not a dead end:
+precise AEON reference resolution, or reading `0x1e4aea`'s master-table access
+on hardware/with a better analyzer, would give the screen-id and thus the
+no-signal handler (where the background fill lives).
+
 **Caveat — no colour-setting code has been found.** A "mute/frame-colour
 register" or colour field is a *hypothesis* (from the mask inference), **not a
 located fact**. `Enable Frame Color` (`0x2aacf9`) is a string whose code we

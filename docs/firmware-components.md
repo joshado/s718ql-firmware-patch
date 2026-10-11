@@ -236,6 +236,24 @@ through a **per-language indexed engine** (confirmed in code):
   `0x1e49e1`, `0x1e4b75`, and a cluster `0x1e9a69`-`0x1e9dd1` that looks like the
   source/no-signal message set (5 nearby calls).
 
+**Full render path (decompiled).** `FUN_ram_001e4aea` is the generic screen
+renderer:
+```
+table    = *(master_table + screen_id*4)      # screen_id = DAT_ram_00307b98
+entry    = table + language*8                  # language = state_struct[+0x47b]
+render(0x219504, entry.ptr, *(u16*)entry.len)  # or 0x219f10 for a variant
+```
+So each OSD screen is `(ptr, len)` per language; a **master pointer table**
+maps a **screen-id** (`DAT_ram_00307b98`, written in 176 places — it is the
+current-message global) to that screen's per-language table; language then
+selects the string. The `(ptr, len)` entries chain (`ptr[i]+len[i] == ptr[i+1]`).
+Sibling renderers `0x1e4a5e`/`0x1e4aa4` hardcode a specific table
+(`0x2e95b4` etc.).
+
+The **no-signal message tables** are located: two 6-entry `(ptr,len)` runs at
+RAM `0x2e9654` (strings `0x2ec6e0..0x2ece52`) and `0x2e99b0`
+(`0x2ece84..0x2ed1ad`, the Es/Fr/De "No signal… Press Source…" strings).
+
 Layout confirms the parallel-language design: the no-signal screen is stored as
 consecutive per-language sub-blocks (En `0x2ecd94`, Es `0x2eceb0`, Fr `0x2ecffc`,
 De `0x2ed162`…), each with the same structure (4 source messages + "Searching" +
