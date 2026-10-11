@@ -43,7 +43,11 @@ understand `0x1b41bbca` *if* it turns out the loader skips it — otherwise we
 solve it first. A length-changing edit (like `unplg`→`unplug`) additionally
 needs either slack bytes after the word or a rebuilt string table.
 
-**CPU note:** none of the above requires disassembling the MStar AP core —
+**CPU note:** none of the above requires disassembling the MStar AP core. If we
+do need it (logic changes), the AEON R2 Ghidra module `eb4x/ghidra-plugin-aeon`
+covers this core (tested on MST9U firmware); load as `AEON:LE:32:R2` at base
+`0x180000`. See firmware-components.md, "Tooling for this core". Originally:
+none of the above requires disassembling the MStar AP core —
 string/table edits are data edits. Logic changes (CEC behaviour, power) *do*
 need the ISA, which is the hard, unsolved part.
 

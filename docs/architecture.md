@@ -161,7 +161,8 @@ for "run our own streaming code" if we can get in.
 
 ## Open questions
 
-- A disassembler for the MST9U risc32/Aeon core (ISA now identified; no stock tool).
+- Validate the AEON R2 Ghidra module (`eb4x/ghidra-plugin-aeon`) against this
+  image and establish the RAM mapping of the post-0x89C79 tables.
 - The precise NXP↔Nuvoton↔scaler wire protocol (which bus carries
   power/standby commands, and the framing) — central to features d and f.
 - Whether the RS232 control protocol flakiness (feature d/f) is in the NXP MCU's

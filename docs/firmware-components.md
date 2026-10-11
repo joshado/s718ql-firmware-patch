@@ -115,6 +115,36 @@ colour, noise reduction, super-resolution, overdrive); `appSystem` / `PM`
 The image also carries a **VESA MCCS/DDC descriptor** (`prot(monitor)type(lcd)
 MStar cmds(...)vcp(...)mccs_ver(2.1)`) and a panel id `MST9U3_PanelCMIM236HGJ_L21`.
 
+**Tooling for this core — it exists.** The MST9U AP core is MStar's AEON
+(AEON R2, OpenRISC-derived), and there is public RE support:
+
+- **`eb4x/ghidra-plugin-aeon`** (Apache-2.0) — a Ghidra SLEIGH processor module
+  for AEON R2. Variants `AEON:LE:32:R2` / `BE:32:R2` / `R2-harvard`. Integer
+  core, branches, loads/stores, `movhi` and system instructions have real
+  p-code; MAC/DSP/SIMD/float/cache decode (right length + operands) but are
+  pseudo-ops. The author reports it decodes **"the MST9U main firmware"** with
+  zero diffs vs vendor objdump over ~1.2M instructions, semantics checked
+  against the vendor simulator. Build/install via `./gradlew buildExtension`.
+- **`shinyquagsire23/ghidra-aeon`** — the original AEON Ghidra port (from LG
+  DualUp / MST9W scaler work); WIP, a few unknown/guessed instructions.
+- **Reko decompiler** — has partial AEON support.
+- **`vladikit-bit/projector-diagnostic-tools`** — patched `aeon_ghidra_public`,
+  Reko projects, Ghidra runners and patch builders (unverified by us).
+- Architecture notes: `linux-chenxing.org` (MStar/SigmaStar community).
+
+The core is **big-endian for instructions, little-endian for data**; our
+header fields are LE, so the **`AEON:LE:32:R2`** language is the match.
+Instructions are 2/3/4 bytes (length from the top bits of byte 0), byte
+aligned, 32 GPRs with r0 = 0, no delay slots, one condition flag. The
+`movhi`+`ori`-style address building is exactly the "immediate pairs, few
+absolute pointers" pattern seen above.
+
+**To load it in Ghidra:** import `ap_decompressed.bin` (or `ap_code.bin`) as
+raw AEON:LE:32:R2 at base **`0x180000`** (the header's `ap_ram_start`). The
+first `0x89C79` is code+data; the reset/exception vectors are at the start of
+the AP prefix (`0x180100`). The DSP/SIMD pseudo-ops and the unresolved mapping
+of the later tables (below) are the known gaps.
+
 **Memory map is only partly understood.** The header's AP RAM range
 (`0x180000`–`0x209C79`, `0x89C79` bytes) is far smaller than the decompressed
 blob (`0x181560`), and the pointer-like words cluster inside exactly that range.
