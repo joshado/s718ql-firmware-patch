@@ -107,38 +107,49 @@ location cannot reach it.
   address** and its per-language table isn't statically locatable (computed at
   runtime from base+language+screen-id).
 
-**NO-SIGNAL BACKGROUND COLOUR FOUND.** The background is set by
-`osd_set_bg_color_332(window, packed)` (`0x1be86b`), writing the frame-colour
-register `0x90102f33`. `packed` is a **3-3-2 RGB** byte (bits5-7=R, 2-4=G,
-0-1=B): **`0x03` = blue (0,0,255)**, `0xe0`=red, `0x1c`=green, `0xff`=white,
-`0x00`=black. The no-signal screen cycles the 8-entry table **`g_nosig_bg_colors`
-(`0x2cf6e4`)** = [black, BLUE, purple, red, green, BLUE, cyan, magenta]; the
-blue is entries [1] and [5] (`0x03`). The white "searching" screen instead uses
-`osd_set_frame_color_rgb(0xff,0xff,0xff)`. **To change the blue:** edit the
-packed value(s) in `g_nosig_bg_colors` (RAM `0x2cf6e4`, combined-image file
-`0x14f6e4`) -- e.g. set the blue entries to another packed colour -- then repack
-(all container gates solved). A data edit, no code change.
+**NO-SIGNAL BACKGROUND MECHANISM NAILED DOWN.** The free-run/no-signal
+background is the scaler **frame-colour register `0x90102f33`** (24-bit RGB,
+written via `scaler_reg_write24` LSB→reg, or packed-3-3-2 via
+`osd_set_bg_color_332` `0x1be86b`). The two screens the user sees map cleanly:
 
-**Caveat — no colour-setting code has been found.** A "mute/frame-colour
-register" or colour field is a *hypothesis* (from the mask inference), **not a
-located fact**. `Enable Frame Color` (`0x2aacf9`) is a string whose code we
-never found; no RGB constant, colour field or register write for the background
-has been identified. (Note: `0x2da620` is the OSD **string-table base**, not a
-colour — it is not a lead for this.)
+- **"Searching" screen = WHITE.** Mode `g_osd_mode==0x0e` ("ShowDiag") calls
+  `osd_set_frame_color` (`0x1ff83c`), which hard-writes `0xffffff`. The RGB
+  setter `osd_set_frame_color_rgb` (`0x1c70ec`) is only ever called
+  `(0xff,0xff,0xff)`.
+- **Stable "no signal" screen = BLUE = the register's power-on/init DEFAULT.**
+  The plain no-signal state (`g_osd_mode==0x04`, reached in `osd_no_input_handler`
+  `0x1e73fe` via the branch that sets the mode with **no colour write**) never
+  touches `0x90102f33`, so the panel shows whatever the register was last set to
+  — its boot default, which is blue.
 
-*Realistic ways forward:* (1) a proper **flow-based** disassembler with
-function-pointer/jump-table detection (replace the blind sweep) to recover the
-indirect call graph and reach the no-signal handler; (2) **dynamic** analysis on
-hardware (watch the no-signal path run); (3) find and read the code behind
-`Enable Frame Color` and the logo/mute subsystem to learn whether the background
-is a register, a struct field, or something else — i.e. establish the mechanism
-before assuming a "colour register" exists. The one weak concrete thread:
-`FUN_ram_001c7c3d` dumps a state struct (`[r10+0xa34]`, fields near `+0xcf2`)
-printing labels incl. `Mute BMP Logo!`, but none of those fields is confirmed to
-be a background colour.
+**Key fact that pins this down:** across the entire AP decompile the *only*
+literal ever written to `0x90102f33` is `0xffffff` (white, 3 sites). Every other
+write is a save/restore of the existing value, the audio-mute grayscale ramp, or
+the burn-in **colour-cycle** (`osd_nosignal_color_cycle` `0x1e76f7`, a *separate*
+mode `0x0d`, gated on `g_input_status&0x40`). No code writes blue — so blue is
+the default, set at init outside the AP (hardware reset default, or sboot/8051),
+not by any AP literal. (An earlier note here claimed the cycle table
+`g_nosig_bg_colors` `0x2cf6e4` produces the blue; that is the burn-in/demo path,
+not the stable screen — corrected.)
 
-If a settable colour value is eventually found, changing it is a small patch
-(container gates solved) — but that "if" is not yet established.
+**To change the blue — two options:**
+1. **Code patch (robust, recommended).** In `osd_no_input_handler` (`0x1e73fe`),
+   on the no-signal mode-4 path, add one write of the desired colour:
+   `scaler_reg_write24(0x90102f33, R | G<<8 | B<<16)` or
+   `osd_set_bg_color_332(0, <packed-3-3-2>)` (`0x03`=blue, `0xe0`=red,
+   `0x1c`=green, `0x00`=black, `0xff`=white). This forces the colour regardless
+   of the boot default. Needs AEON code injection (toolchain ready) + repack
+   (all container CRCs solved).
+2. **Find/patch the init default.** Locate the boot-time write of the free-run
+   colour (likely sboot `sboot.bin` or the 8051 `pm_8051.bin`, or a register-init
+   table) and change it there. Cleaner (no AP code change) but requires finding
+   the init site in those images.
+
+*Not yet pinned:* the exact init site that sets the blue default (option 2).
+Searching the AP for the register literal is futile — `0x90102f33` is built at
+runtime with `movhi 0x9010`/`ori 0x2f33`, never stored as a word. Confirming the
+default empirically (serial debug console reads `0x90102f33` live at no-signal)
+is the fastest way to verify before/after a patch.
 
 ## (c) Root on the two Linux systems — genuinely easy
 

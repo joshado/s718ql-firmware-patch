@@ -19,7 +19,7 @@
 0x001c62f9	func	scaler_reg_write	[?] (reg,val,mask) register write; e.g. (0x101d20,0,1)
 #
 # ---- traced from osd_no_input_handler (0x1e73fe) ----
-0x001ff83c	func	osd_set_frame_color	[C] prints "Enable Frame Color", writes scaler colour regs = the no-signal background/frame fill
+0x001ff83c	func	osd_set_frame_color	[C] "Enable Frame Color"; hard-writes WHITE (0xffffff) to frame-colour reg 0x90102f33 = the "searching" screen (g_osd_mode==0x0e). NOT the blue screen
 0x001fe47d	func	osd_draw_mute_logo	[C] references "Mute BMP Logo"; draws the mute/logo screen
 0x001f1530	func	scaler_set_tcon_format	[C] references "TCON_Format%d"; timing-controller setup
 0x001c91cf	func	dbg_print	[C] debug print (no-op unless g_dbg_enable set); takes a string arg
@@ -38,9 +38,14 @@
 0x002cfd98	data	g_timer_cfd98	[?] set to 100 on signal loss
 #
 # ---- no-signal BACKGROUND colour (feature a) ----
-0x001be86b	func	osd_set_bg_color_332	[C] set free-run/no-signal background colour. arg2 = packed 3-3-2 RGB (bits5-7=R,2-4=G,0-1=B): 0x03=blue 0xe0=red 0x1c=green 0xff=white 0x00=black. writes frame-colour reg 0x90102f33
-0x001c70ec	func	osd_set_frame_color_rgb	[C] set_frame_color(R,G,B) -> reg 0x90102f33 (24-bit). searching screen uses (0xff,0xff,0xff)=white
-0x001e76f7	func	osd_nosignal_color_cycle	[C] cycles the no-signal bg colour (g_osd_mode==0x0d) through g_nosig_bg_colors
-0x002cf6e4	data	g_nosig_bg_colors	[C] 8 packed-3-3-2 no-signal background colours: [0]black [1]BLUE [2]purple [3]red [4]green [5]BLUE [6]cyan [7]magenta
+# The STABLE blue no-signal screen = the DEFAULT value of frame-colour reg
+# 0x90102f33 (set at init, NOT by any AP literal). The AP only ever writes WHITE
+# (0xffffff) to it, in the "searching"/diag path. To change the blue: patch in a
+# colour write on the mode-4 no-signal path, or patch the init default. See
+# docs/feature-targets.md (a).
+0x001be86b	func	osd_set_bg_color_332	[C] set free-run background colour. arg2 = packed 3-3-2 RGB (bits5-7=R,2-4=G,0-1=B): 0x03=blue 0xe0=red 0x1c=green 0xff=white 0x00=black. writes frame-colour reg 0x90102f33. callers pass white/black/cycle-table only
+0x001c70ec	func	osd_set_frame_color_rgb	[C] set_frame_color(R,G,B) -> reg 0x90102f33 (24-bit). ONLY caller passes (0xff,0xff,0xff)=white
+0x001e76f7	func	osd_nosignal_color_cycle	[C] BURN-IN colour cycle (g_osd_mode==0x0d, separate demo mode; NOT the stable no-signal screen) through g_nosig_bg_colors
+0x002cf6e4	data	g_nosig_bg_colors	[C] 8 packed-3-3-2 colours for the burn-in cycle: [0]black [1]blue [2]purple [3]red [4]green [5]blue [6]cyan [7]magenta
 0x001c64ed	func	scaler_reg_write24	[C] write 24-bit value (RGB) to reg,reg+1,reg+2
 0x001c6162	func	scaler_mmio_write_byte	[C] byte write to a scaler register (base g_scaler_mmio_base)
