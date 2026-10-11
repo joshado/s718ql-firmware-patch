@@ -13,28 +13,45 @@ an external SPI programmer to recover.
 
 ---
 
-## 1. Scaler — `MERGE.bin` — repacker FULLY SPECIFIED (all gates solved)
+## 1. Scaler — `MERGE.bin` — repacker WRITTEN + round-trip PROVEN (not flashed)
 
-We can parse and checksum-verify it (`tools/mst9u_merge.py`), and every piece
-needed to rebuild is now understood (verified in-session; repacker still to be
-written and flash-tested).
+`tools/mst9u_merge.py` parses/verifies **and now repacks** it. Two modes:
+- `roundtrip` — passthrough rebuild that REUSES the original deflate bytes and
+  recomputes the framing. **Proven byte-identical** against the pristine
+  MERGE.bin (all four checksums reproduce; 1,473,068 B match exactly). This is
+  the keystone: it proves we can reproduce the brick-critical regions
+  (pm_8051/sboot/ap_prefix/tail) and every framing field before any flash.
+- `repack <MERGE.bin> <ap_decompressed.bin> <out>` — rebuild with a modified AP:
+  re-DEFLATE + recompute all derived fields + fix up resource offsets (below).
+  `region_diff()` reports exactly which regions changed (the diff-gate mitigation).
 
-To rebuild:
+What the repacker does, step by step:
 
 1. Modify the decompressed AP (`ap_decompressed.bin`) and/or tail resources.
 2. Re-DEFLATE the AP as a **raw** stream (`zlib.compressobj(9, DEFLATED, -15)`).
    The on-device boot path inflates **standard raw DEFLATE** — confirmed:
    Python `zlib.decompressobj(-15)` inflates the shipped stream to our exact
-   `ap_decompressed.bin`. Re-deflating the unmodified AP at level 9 is `0x86c33`
-   vs the original `0x86473` (**+1,984 bytes**), so the size delta from an edit
-   is small; mind the total flash budget.
-3. Rewrite the header u32s at `0x10000`: `ap_flash_end` and the CRC-32 field
-   (below), plus the `filesize-4` field.
-4. Append u32 decompressed-size, then the **CRC-16/CCITT-FALSE** over
+   `ap_decompressed.bin`. Re-deflating the unmodified AP at level 9 is ~`0x86c3c`
+   vs the original `0x86473` (**~+2 KB**) — note this means **any** re-deflated
+   image differs from the vendor's even with no logical change, so a *patched*
+   image can only be validated by re-checksum + region diff, never by comparing
+   to the original. Mind the total flash budget.
+3. **Fix up the TEL resource offsets (critical).** The 4 TEL records (RAM
+   `0x18200e`, 11 B each: `[id:2][offset:4][size:4][flag:1]`, big-endian) store
+   **absolute MERGE.bin file offsets** (used via the `0xC0000000` flash window),
+   and the resources are packed contiguously right after `ap_flash_end`. Because
+   re-deflation grows the stream and shifts the whole tail by `delta`, every tail
+   offset must be bumped by `delta` or the loader reads the wrong bytes (broken
+   logo/JPEG). `shift_tel_offsets()` does this in the uncompressed prefix, which
+   the CRC-16 + header CRC-32 then re-cover. (Verified: the JPEG offset lands on a
+   valid `FFD8` SOI after the shift.)
+4. Rewrite the header u32s at `0x10000`: `ap_flash_end`, `ap_ram_end` (tracks the
+   flash-region size), the CRC-32 field (step 6), and `filesize-4`.
+5. Append u32 decompressed-size, then the **CRC-16/CCITT-FALSE** over
    `[0x20080 .. stream_end)`.
-5. Recompute **header[5]** = CRC-32 (MSB-first, poly `0x04C11DB7`, init 0, no
+6. Recompute **header[5]** = CRC-32 (MSB-first, poly `0x04C11DB7`, init 0, no
    final XOR) over the **AP flash region** `[0x20080 .. ap_flash_end)`.
-6. Recompute the **trailer** CRC-32 (same algorithm, stored big-endian) over
+7. Recompute the **trailer** CRC-32 (same algorithm, stored big-endian) over
    everything but the last 4 bytes.
 
 **The former "blocking unknown" `0x1b41bbca` is SOLVED.** It is the CRC-32
@@ -60,8 +77,8 @@ AEON assembly (fine for small hooks, impractical for large features). Free space
 for a hook exists past the image (BSS) or in padding, but a hook that grows the
 image still goes through the re-DEFLATE + re-checksum path above.
 
-**Not yet proven on hardware.** The repacker is specified but unwritten; nothing
-has been flashed. Flashing risk is the highest of all components: the USB
+**Not yet proven on hardware.** The repacker is written and the passthrough
+round-trip is byte-identical, but nothing has been flashed. Flashing risk is the highest of all components: the USB
 updater lives *inside* the image being replaced, so a bad flash likely bricks
 the scaler until reflashed with an **external SPI programmer**. Establish that
 SPI recovery path (identify the flash chip, wire up a CH341A/flashrom) **before**
