@@ -64,9 +64,11 @@ also hosts the **USB firmware-upgrade** path (the "copy MERGE.bin to a USB
 stick" flow). Internally it's three pieces of code in one image: an 8051-based
 **PM (power management) core** for standby, a boot loader (`sboot`), and the
 large main application ("AP") that runs the UI. Build stamp in this image:
-`Jun 29 2017` / later strings `Feb 02 2017`. CPU is MStar's proprietary core
-(*inferred*: the "aeon" family, an OpenRISC-derived variable-length ISA — not
-stock ARM/MIPS), which is the main obstacle to code-level patching.
+`Jun 29 2017` / later strings `Feb 02 2017`. CPU is MStar's proprietary **32-bit RISC core** ("risc32", the Aeon family;
+**confirmed** from the source path `./cpu/risc32/MST9U/interrupt.c` and the
+symbol `_HAL_SetAeon_SPIMappingAddr` — not stock ARM/MIPS). No stock
+disassembler exists for it, which is the main obstacle to code-level patching.
+See `docs/firmware-components.md` for the module/subsystem breakdown.
 
 ### 2. TI DLPC4422 — "DDP" on the Formatter board (DDP FW)
 **What a "formatter board" is:** in a DLP projector the imager is a **DMD**
@@ -159,7 +161,7 @@ for "run our own streaming code" if we can get in.
 
 ## Open questions
 
-- Exact ISA of the MST9U AP core and whether a disassembler exists for it.
+- A disassembler for the MST9U risc32/Aeon core (ISA now identified; no stock tool).
 - The precise NXP↔Nuvoton↔scaler wire protocol (which bus carries
   power/standby commands, and the framing) — central to features d and f.
 - Whether the RS232 control protocol flakiness (feature d/f) is in the NXP MCU's

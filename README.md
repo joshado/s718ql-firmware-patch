@@ -78,7 +78,9 @@ decompiled/      hand-decompiled C for reading (not buildable, not verified)
 - **Scaler (`MERGE.bin`)** — layout fully mapped; both integrity checks
   (a CRC-16 over the program, a CRC-32 over the whole file) are reproduced in
   code. The main program decompresses from a raw DEFLATE stream. CPU is the
-  tricky part (MStar's proprietary core, not stock ARM/MIPS).
+  tricky part: MStar's proprietary 32-bit RISC core ("risc32"/Aeon, confirmed),
+  with no stock disassembler. Code region split out and its module structure
+  mapped (see docs/firmware-components.md).
 - **Network module (`ACTUPGRADE.bin`)** — container is a flat record table with
   a 32-bit additive checksum we reproduce exactly. Linux/MIPS, EZCast Pro stack.
   Filesystems extract cleanly.

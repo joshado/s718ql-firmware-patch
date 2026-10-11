@@ -76,6 +76,53 @@ S718QL`, keystone (`dvOmnitek_*Keystone_Write` → an **Omnitek** warp block),
 `PowerOffSystem`, `enter ePM_POWER_DPMS`, logo-capture functions, and the USB
 upgrade engine (`MW_UsbDownload_*`, `MERGE.BIN`, `Merge2.bin`).
 
+### Program code (`ap_code.bin`, `0x0`–`0xD0000`)
+
+The first ~832 KB of the decompressed AP, split out as
+`firmware/unpacked/scaler/ap_code.bin` for inspection. High-level structure,
+from debug strings and statistics (no disassembler for this core yet):
+
+**CPU — confirmed.** MStar's proprietary **32-bit RISC core** ("risc32", the
+Aeon family). Evidence in the image: the source path
+`./cpu/risc32/MST9U/interrupt.c`, the symbol `_HAL_SetAeon_SPIMappingAddr`,
+and `Sboot Chip ID`. Not ARM/MIPS; no stock disassembler. Absolute 32-bit
+pointers are rare in the code (~1% of aligned words fall in the AP RAM range),
+i.e. the core builds addresses from immediate pairs (hi/lo) rather than a
+literal pool — typical of this RISC. That is the main obstacle to code-level
+patching.
+
+**It is an MStar "monitor_ap" application.** Source paths and log tags reveal a
+layered build (vendor framework, not a general-purpose OS):
+
+| Layer | Evidence | Role |
+|---|---|---|
+| `cpu/risc32/MST9U/` | `interrupt.c`, `timer_cb/` | core: interrupt vectors, timers |
+| `monitor_ap/KERNEL/SYSTEM/` | `Debug.c`, `hwi2c.c` | kernel: logging, I2C bus |
+| `monitor_ap/DRIVER/` | `msScaler.c`, `mapi_CEC.c` | drivers: scaler, HDMI-CEC |
+| `monitor_ap/CUSTOM/MSTAR/USERFUN/` | `MenuFunc.c` | customer layer: OSD menu actions |
+| `MApi_*` / `MDrv_*` / `msAPI_*` | prefixes in strings | MStar API / driver / app-API layers |
+
+**Subsystems** (from `[TAG]` log prefixes, by frequency): `DB_PxP` /
+`appWindow` / `msScaler` (the display pipe: picture-in-picture, windows,
+scaling, frame-sync); `PQ` and its many sub-tags `PQ_Init`, `PQ_LoadUserTiming`,
+`PQ_LoadScalingTable`, `NR`, `MPEGNR`, `SR`, `OD` (picture quality: gamma,
+colour, noise reduction, super-resolution, overdrive); `appSystem` / `PM`
+(system and power management); `MSFLASH` (SPI flash / the USB upgrade engine,
+`MW_UsbDownload_*`); `CEC`; `PANEL` / `LVDS` / timing (`FindMode`,
+`LoadTiming`); `dvOmnitek_*` (the Omnitek keystone/warp block); `OSD2`
+(on-screen display); `VK` (remote/virtual keys); `GPO0`–`GPOA` (GPIO outputs).
+
+The image also carries a **VESA MCCS/DDC descriptor** (`prot(monitor)type(lcd)
+MStar cmds(...)vcp(...)mccs_ver(2.1)`) and a panel id `MST9U3_PanelCMIM236HGJ_L21`.
+
+**Memory map is only partly understood.** The header's AP RAM range
+(`0x180000`–`0x209C79`, `0x89C79` bytes) is far smaller than the decompressed
+blob (`0x181560`), and the pointer-like words cluster inside exactly that range.
+So the first ~`0x89C79` is the live code+data loaded at `0x180000`, and the
+later regions (tables at `0x124000`+, menu text at `0x164000`+, fonts) are
+addressed some other way. How those map into the core's address space is not
+yet resolved; it matters for interpreting any table offset.
+
 ### Layout of the decompressed AP (`ap_decompressed.bin`, 0x181560 bytes)
 
 From a statistical survey (entropy and text density per 16 KB block, plus spot
