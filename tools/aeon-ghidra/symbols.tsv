@@ -1,0 +1,38 @@
+# Curated symbol table for the MStar MST9U (AEON) scaler AP.
+# Our own annotations (not vendor symbols) — edit freely and re-run regen.sh.
+# Format:  addr <TAB> kind(func|data) <TAB> name <TAB> comment(optional)
+# Addresses are RAM (image loaded at 0x180000). Applied AFTER the auto namer,
+# so these override NameFromStrings guesses. Confidence noted in comments:
+# [C]=confirmed in code, [I]=inferred, [?]=tentative.
+#
+# ---- OSD string / i18n engine (see docs/firmware-components.md) ----
+0x00219504	func	osd_render_glyph_string	[C] glyph renderer: (win,str_ptr,len,...) -> draws OSD text
+0x00219f10	func	osd_render_glyph_string_v2	[?] sibling renderer used by one screen path
+0x001e4aea	func	osd_render_screen	[C] master_tbl[screen_id][language] -> (ptr,len) -> render; screen_id=g_osd_screen_id
+0x001e49e1	func	osd_render_screen_tbl_2e8998	[C] renders the per-language table at 0x2e8998
+0x001e4a5e	func	osd_render_screen_tbl_2e95b4	[C] table[language*8] at 0x2e95b4 -> render
+0x001e4aa4	func	osd_render_screen_3	[I] same shape, own table
+0x001e9d6d	func	osd_show_ascii_as_id	[C] copies an ASCII string via ascii_to_glyph, renders with a msg id
+0x001e9942	func	ascii_to_glyph	[I] per-char ASCII -> OSD glyph-index transform
+0x001e9f2d	func	osd_msg_by_source	[C] picks a per-source label (g_src_type 0x01/02/03/05), shows id 0xde
+0x001e9de9	func	osd_msg_sel_f5_d0	[?] picks id 0xf5/0xd0 by g_osd_state==0x11
+0x001ea0c7	func	osd_msg_sel_f0_c2	[?] picks id 0xf0/0xc2 by g_osd_state==0x11
+0x001c7c3d	func	osd_state_debug_dump	[C] prints many state fields with labels (incl "Mute BMP Logo!")
+0x001c59a3	func	dbg_printf	[I] logger: (fmt_str, value)
+#
+# ---- OSD state / tables ----
+0x00307b98	data	g_osd_screen_id	[C] current OSD screen/message id (176 writers); indexes the master table
+0x002d0a34	data	p_scaler_state	[C] pointer to the scaler/window state struct (+0x47b=language, +0x45d=window idx)
+0x0030f6d8	data	g_window_info	[I] per-window info array, stride 0x84; [0]=current input/source type
+0x00304d14	data	g_osd_string_base	[C] set to 0x2da620 before rendering
+0x002da620	data	osd_string_region	[C] OSD string-region base
+0x0030574c	data	g_osd_small_font	[?] engine picks 0x12/0x18 glyph height from this
+0x002e8998	data	osd_tbl_scr_a	[C] per-language (ptr,len) table for one screen
+0x002e95b4	data	osd_tbl_scr_b	[C] per-language (ptr,len) table (used by osd_render_screen_tbl_2e95b4)
+0x002e9654	data	osd_tbl_nosignal_1	[C] no-signal per-language (ptr,len) table (strings 0x2ec6e0..0x2ece52)
+0x002e99b0	data	osd_tbl_nosignal_2	[C] no-signal per-language (ptr,len) table (Es/Fr/De "No signal..Press Source")
+#
+# ---- strings of interest (code refs not all found) ----
+0x002aacf9	data	str_enable_frame_color	[C] "[msScalerAP] Enable Frame Color" (referencing code NOT located)
+0x002b013e	data	str_mute_bmp_logo	[C] "Mute BMP Logo!"
+0x002ecd94	data	str_nosignal_hdmi1_en	[C] "No HDMI 1 (2.0) signal. Press <Source> to switch input." (English)

@@ -32,6 +32,32 @@ binary, runs auto-analysis, and writes a full listing via
 calls (`b.jal`), returns (`b.jr r9`) and `b.movhi`+`b.addi` address pairs all
 decode cleanly.
 
+## Named C dump with an editable symbol table
+
+`regen.sh` produces a full named disassembly + decompilation driven by a
+**persistent, editable symbol table** — `symbols.tsv` (our annotations, version
+controlled). Edit the table, re-run, and the names reappear in the output:
+
+```sh
+# edit tools/aeon-ghidra/symbols.tsv  (addr <TAB> func|data <TAB> name <TAB> comment)
+tools/aeon-ghidra/regen.sh
+# -> firmware/unpacked/scaler/ap_decompressed.bin.aeon.{asm,c}  (with our names)
+#    scaler_symbols_auto.tsv   (what the auto-namer found — merge useful rows in)
+#    symbols_dump.tsv          (all user names after apply — round-trip capture)
+```
+
+Pipeline order (each a Ghidra post-script): exhaustive disassembly
+(`DisassembleCodeRegion`) -> pointer resolution (`AeonResolvePointers`) ->
+define strings (`DefineStrings`) -> auto-name from strings (`NameFromStrings`)
+-> **apply curated table (`ApplySymbols`, overrides auto)** -> export
+`.asm`/`.c` (`ExportListing`/`ExportDecomp`) -> capture names (`DumpSymbols`).
+
+The decompiler uses the names (e.g. `osd_render_screen`, `g_osd_screen_id`) and
+shows table comments as C comments. Full-image decompile is slow under
+emulation — pass `regen.sh <bin> <base> <dstart> <dend>` to limit the range
+while iterating. `symbols.tsv` is committed; all generated outputs stay under
+git-ignored `firmware/`.
+
 ## Naming / symbol recovery
 
 `analyze.sh <binary>` runs the full pipeline (define strings, recover pointers,
