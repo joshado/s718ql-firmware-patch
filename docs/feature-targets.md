@@ -53,43 +53,43 @@ shows null separators between messages, which is promising.
 
 ## (a) No-input-source background colour
 
-**Subsystems located; exact colour value not yet pinpointed.** From the AEON
-disassembly/decompile (`tools/aeon-ghidra/`) and the string dump:
+**Status: subsystems identified by strings; mechanism NOT confirmed in code;
+the exact colour value NOT found.** Be careful reading the earlier optimistic
+notes — the following is what is actually established vs inferred.
 
-- The blue "no signal" field + Dell logo is the scaler's **no-source / mute
-  screen**. Two mechanisms are present:
-  - a **"Frame Color" / free-run background** — string `[msScalerAP] Enable
-    Frame Color` at RAM `0x2aacf9`; this is the solid field the scaler outputs
-    with no sync;
-  - a **logo/mute-screen** subsystem — `Mute BMP Logo!` (`0x2b013e`),
-    `initScanLogoCapture`/`setLogoCapture`, and user prefs
-    `USER_PREF_SYS_DRAW_BMP_LOGO`, `USER_PREF_SYS_LOGOCAPTURE`,
-    `USER_PREF_SYS_LOGOASPECT`.
-- The **Dell logo** is the JPEG at `MERGE.bin` `0xb9d08` (292×292, extracted to
-  `firmware/unpacked/scaler/images/`). It is drawn *on top of* the background;
-  replacing/removing it is a pure **data edit**.
-- The `DefCool/DefNormal/DefWarm/DefsRGB_{Red,Green,Blue}Color` values are
-  **colour-temperature picture gains**, not the background — a red herring.
+*Established:*
+- The Dell logo is a 2-tone JPEG (82% white bg, 18% Dell blue ~RGB 20,135,199)
+  stored as TEL resource type `0xc5` at `MERGE.bin 0xb9d08`, size `0x5110`. Its
+  resource record holds only type/offset/size — **no colour or palette data**.
+- On screen the logo is white on a blue field (user-reported) — a figure-ground
+  + colour swap that **no per-pixel RGB op reproduces** (negate→orange-on-black,
+  R/B swap→orange-on-white).
+- Strings exist for a "Frame Color"/free-run background (`[msScalerAP] Enable
+  Frame Color`, `0x2aacf9`) and a logo/mute subsystem (`Mute BMP Logo!`
+  `0x2b013e`, `initScanLogoCapture`/`setLogoCapture`, `USER_PREF_SYS_DRAW_BMP_
+  LOGO`/`LOGOCAPTURE`/`LOGOASPECT`). The logo **preference** string is
+  referenced by `FUN_ram_001a93ce`; the colour-temp defaults
+  (`DefCool_RedColor` …) are referenced by several PQ functions (picture gains,
+  not the background).
 
-**Why the exact colour isn't pinned yet:** Ghidra did not disassemble/resolve
-the code that references `Enable Frame Color` (no construction of `0x2aacf9`
-appears in the listing), a consequence of the AEON data-pointer reference gap
-(see firmware-components.md) plus a few uncovered functions. There is no
-`FreeRun`/`Background`/`MuteColor` string to anchor on either. Finding the RGB
-constant / register write means **manual tracing** from the no-signal state
-machine to the fill — on the order of hours, and the main cost of this feature.
+*Inferred, NOT verified in code:* that the logo is drawn as a mask/key with the
+background (blue) and foreground (white) as separate colour parameters. It is
+the only explanation consistent with the evidence above, but the actual drawing
+code has not been read.
 
-**Feasibility verdict:**
-- *Changing* the colour once located: **easy** — a small data or in-place code
-  patch, then repack+re-sign (all container gates now solved; assembler works).
-- *Locating* it: **medium-hard** — manual AEON tracing; the automated string
-  resolution doesn't cover the data pool.
-- *Possible shortcuts:* (1) it may be a **free-run/mute colour register** whose
-  value is reachable by tracing the no-signal handler; (2) the logo prefs are
-  `USER_PREF_SYS_*`, so a **service-menu / RS232 / I²C setting** might change
-  background/logo behaviour **without reflashing** — worth checking the menu and
-  command handlers first; (3) replacing the **logo JPEG** is trivial if that
-  alone suffices.
+*Why not verified — disassembly is incomplete.* Our Ghidra AEON disassembly
+covers only **~35%** of the code region (193 KB of `0x89c79`; instruction span
+ends at `0x225adb`). Ghidra disassembled only entry-reachable functions; ~65% of
+the code — almost certainly including the `Mute BMP Logo!` draw and the frame-
+colour fill — was never disassembled. A Python constant-fold over the listing
+finds refs to `DefCool_RedColor` and the logo pref, but **none** to
+`Mute BMP Logo!` or `Enable Frame Color`, consistent with that code being
+outside the analysed set.
+
+*Real next step:* force exhaustive disassembly of the whole code region
+(aggressive instruction finder / disassemble-all-undefined), then re-run the ref
+search. Only then can the mechanism and the colour value be confirmed. Changing
+the value, once found, remains a small patch (container gates all solved).
 
 ## (c) Root on the two Linux systems — genuinely easy
 

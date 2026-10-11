@@ -151,6 +151,14 @@ load at base **`0x180000`** (the header's `ap_ram_start`). The reset/exception
 vectors are at the start of the AP prefix (`0x180100`). The DSP/SIMD pseudo-ops
 and the unresolved table mapping (below) are the known gaps.
 
+**Disassembly coverage is only ~35%.** Ghidra's AEON auto-analysis disassembled
+193 KB of instructions (64,525 insns, 956 functions, span `0x180800`-`0x225adb`)
+out of the `0x89c79` (563 KB) code region — it follows only entry-reachable
+flow, and AEON flow discovery is incomplete, so ~65% of the code is NOT yet
+disassembled. Any claim about code behaviour (naming, feature location) is
+limited to that 35%. Fixing this (exhaustive/aggressive disassembly of the code
+region) is the prerequisite for reliable scaler code analysis.
+
 **Symbol recovery (partial).** `tools/aeon-ghidra/analyze.sh` names functions
 from the debug strings they reference. Yield is low — ~10 auto-named, ~37
 annotated with their strings (`scaler_symbols.tsv`) — because Ghidra has no
