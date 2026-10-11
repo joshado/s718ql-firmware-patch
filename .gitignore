@@ -10,3 +10,6 @@ firmware/
 tools/aeon-ghidra/*.zip
 **/scaler_symbols.tsv
 **/sample.c
+dist/
+firmware/unpacked/scaler/ap_combined_patched.bin
+firmware/unpacked/scaler/feature-a-asm.txt

@@ -1,0 +1,26 @@
+# Feature a: force the no-signal background to RED (255,0,0).
+# Hook osd_nosig_draw (0x1dbc84): overwrite its first 8 bytes with a jump to a
+# cave in the unused AP-prefix padding (0x182048). The cave writes the free-run
+# frame-colour register (0x90102f33) = 0x0000ff (R=0xff,G=0,B=0 -> red), restores
+# regs, runs the 3 displaced prologue instructions, and returns to 0x1dbc8c.
+# r9/r10 are saved/restored around the call (r3-r8/r11 are set fresh by the body).
+@0x182048
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.movhi r3,0x9010
+b.ori r3,r3,0x2f33
+b.ori r4,r0,0xff
+b.jal 0x1c64ed
+b.lwz r9,0x4(r1)
+b.lwz r10,0x0(r1)
+b.addi r1,r1,0x8
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.j 0x1dbc8c
+# --- hook site: exactly 8 bytes (0x1dbc84..0x1dbc8c), b.j + two r0 nops ---
+@0x1dbc84
+b.j 0x182048
+b.movi r0,0x0
+b.movi r0,0x0

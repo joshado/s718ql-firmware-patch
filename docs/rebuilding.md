@@ -100,32 +100,146 @@ tracing or a serial console.
 
 ---
 
-## 2. Network (AM8250) — `ACTUPGRADE.bin` — repacker STRAIGHTFORWARD
+## 2. Network (AM8250) — `ACTUPGRADE.bin` — repacker WRITTEN + round-trip PROVEN; rooted image BUILT w/ serial + SSH root (not flashed)
 
-The cleanest target. `tools/act_unpack.py` splits it; the only integrity field
-is the 32-bit additive sum at offset 0x20, which we reproduce. To rebuild:
+The cleanest target. `tools/act_unpack.py` splits it; `tools/act_repack.py`
+rebuilds it. **Round-trip is byte-identical** (re-packing the pristine image with
+no changes reproduces it exactly, SHA-256 `2cf39081…`, and the recomputed sum
+equals the stored value).
 
-1. Edit a filesystem (e.g. rootfs), rebuild it as **ext2** at the original size
-   (`mke2fs -t ext2`, or edit in place via loopback / `debugfs`).
-2. Splice the new partition back at its record offset.
-3. Recompute the body sum and write it to the checksum record.
+**The integrity field — fully pinned.** CHECKSUM record at file offset `0x20`
+(`name[16]`, then `<4I` at `0x30`: `hdr_len`, `body_len`, `0`, `checksum`). The
+checksum is a **32-bit additive sum of the little-endian u32 words over the body
+`[hdr_len : hdr_len+body_len]` = `[0x40 : EOF]`, mod 2^32**. For M0R005:
+`hdr_len=0x40`, `body_len=0x10127bc0`, stored sum **`0x30cf215e`** (reproduced).
+The 4-byte checksum field (inside the 0x40-byte header) is not covered by itself.
 
-A full `act_repack.py` is a small amount of work and should round-trip trivially
-because the container is just concatenated records + a sum. **To be written.**
-Open question: whether the on-device OTA (`am7x_ota_upgrade.ko`) does any
-*additional* signature check beyond this sum — must verify before flashing.
+`act_repack.py` is a *patch-the-original* repacker (not reassemble-from-parts),
+so it preserves all inter-record padding and every untouched record verbatim:
+```
+act_repack.py <src.bin> <out.bin> [--replace NAME=PATH ...]   # NAME e.g. rootfs
+act_repack.py --verify <container.bin>
+```
+A `--replace` file must exactly equal the record's slot size. It copies src→out,
+splices the replacement at the record offset, recomputes the sum, rewrites `0x3c`.
+
+**Filesystem editing.** `part_rootfs.bin` is **ext2** (1 KiB blocks). Edit a work
+copy in Docker with `debugfs -w` (`rm` + `write` + `sif` to restore mode/uid/gid —
+note the vendor files are **mode 0775, uid/gid 1023**, a quirk to preserve), then
+`e2fsck -fn`, then `--replace rootfs=<work copy>`. Splicing + re-summing changes
+only the rootfs region + the 4-byte sum (verified: a password-only edit touched
+**78 bytes total** across the whole 269 MB image).
+
+**Rooting status (feature c) — SERIAL + SSH, image BUILT.** Current
+`dist/network/ACTUPGRADE.bin` (SHA-256 `d572c10a…`) delivers root TWO ways:
+serial and network. Full build record + undo in `dist/network/MANIFEST.txt`.
+(The earlier serial-only build `d79798f2…`, which merely blanked the root
+password, is superseded by this one.)
+
+- **Serial root (passwordless).** inittab's stock `::askfirst:-/bin/sh` execs
+  `/bin/sh` directly — no login prompt, so it never consults `/etc/shadow` —
+  giving passwordless root on the serial console. getty is commented out.
+- **Network root (SSH, new).** dropbear 2022.83 on port 22, launched from rcS.
+
+**Why a daemon had to be injected.** busybox v1.15.1 here was built **without
+`telnetd`, `dropbear`, `inetd`, `httpd`, `tftp`, `wget` and even `nc`** —
+verified against busybox's packed applet-name table, not just a string grep.
+Networking applets are only `arp arping ifconfig netstat ping route rx udhcpc
+udhcpd`. So **a config-only edit cannot open a root shell over the network**;
+the rcS line `#/usr/sbin/telnetd` is a dead comment. (An earlier unauthenticated
+bind-shell sketch, `overlay/tcpsh.c`, was abandoned in favour of a real
+authenticated SSH server.)
+
+**The injected daemon: static-musl dropbear.**
+- **Build (static MUSL, not glibc):** static glibc breaks `getpwnam`/NSS so
+  dropbear couldn't resolve users; **musl** reads `/etc/passwd`+`/etc/shadow`
+  directly and works fully static. Toolchain `muslcc/x86_64:mipsel-linux-musl`
+  (gcc 11.2.1; the host binaries are **i386**, so register the i386 qemu binfmt
+  — `tonistiigi/binfmt --install 386,amd64` — before the cross-gcc will exec on
+  an arm64 Mac). `./configure --host=mipsel-linux-musl CC=gcc --disable-zlib
+  --disable-harden CFLAGS="-Os -fno-pie …" LDFLAGS="-no-pie …"` then
+  `make PROGRAMS="dropbear dropbearkey scp" MULTI=1 STATIC=1`. The `--disable-harden`
+  + `-no-pie` is **important**: the musl gcc defaults to `-pie`, which yields a
+  static-**PIE** (`ET_DYN`) that is risky to load on the ancient 2.6.27 kernel;
+  forcing non-PIE gives a classic `ET_EXEC` static binary (the safe format).
+  Result: `dropbearmulti`, ELF32 MIPS-I LE o32, statically linked, 441336 B,
+  SHA-256 `07234460…`. Smoke-tested under qemu-mipsel (usage prints; RSA+ECDSA
+  host-key generation succeeds).
+- **Install (via `debugfs -w`, image size unchanged, e2fsck clean):**
+  `/usr/sbin/dropbearmulti` (0755) + `dropbear`/`dropbearkey` symlinks;
+  `/etc/dropbear/` with **pre-generated** RSA+ECDSA host keys (0600) — the rootfs
+  is read-only at runtime, so keys are generated at build time and read via `-r`,
+  never written on first boot.
+- **Auth:** dropbear rejects empty passwords, so the root password is set to a
+  known md5crypt `$1$` hash (plaintext **`projector`**, documented in the
+  manifest with "CHANGE THIS"). This enables SSH password auth and does **not**
+  affect the passwordless serial `askfirst` shell.
+- **Launch:** a non-fatal, backgrounded, `[ -x ]`-guarded block appended to
+  `/etc/init.d/rcS` (after the `am7x_net.ko` insmod), pidfile in `/tmp` (tmpfs)
+  so a read-only `/` is fine:
+  `/usr/sbin/dropbearmulti dropbear -p 22 -P /tmp/dropbear.pid -r <rsa> -r <ecdsa> &`.
+- **Verified:** output same size as source; additive sum self-consistent
+  (`0x758b06fb`, VERIFY OK); whole-file diff vs pristine confined to the rootfs
+  region `[0xa1ba00:0xf31ba00)` + the 4-byte sum field (ZERO bytes elsewhere —
+  FIRM/user1/bak/vram byte-identical); the rootfs re-carved from the built image
+  is `e2fsck -fn` clean with dropbear + keys + shadow + rcS line all present.
+- **Residual risk:** musl/2.6.27 compat is only qemu-user smoke-tested, not run
+  against a real 2.6.27 kernel (dropbear uses only classic syscalls and reads
+  `/dev/urandom` directly, so it is likely fine; failure mode is benign — rcS
+  backgrounds it). Default password is public until changed. Not flashed.
+
+**OTA signature — RESOLVED (no image signing found).** The open question is
+answered by static analysis of the update path:
+- `am7x_ota_upgrade.ko` / `am7x_upgrade.ko` check only the container additive sum
+  (`cal_checksum`, strings `ActionsFirmware`/`CHECKSUM`) plus zlib **crc32** on the
+  *compressed FIRM blob* ("zip/unzip file checksum error") and an MBREC checksum —
+  **no rsa/ecdsa/sha/md5/hmac/cert/public-key** anywhere. (`DecryptFlag`/`__key`/
+  `remove HDCPKey` is HDCP-key handling, not firmware signing.)
+- `fui.app` (userspace OTA) returns "Ota firmware is invalid" from that checksum;
+  its `/etc/cert/*.pem` + `EncrypType=AES` + `ezcastPskDecrypt` are TLS/WiFi-WPA
+  (the HTTPS *download*), **not** image signing. `manager.app`: no crypto strings.
+- We only edited the rootfs ext2; FIRM and MBREC are byte-identical, so their
+  CRCs still pass. **Conclusion: a correctly-summed image should be accepted.**
+- **Residual unknown:** Dell's production flash is the USB/ADFU ROM path
+  (`ADECadfus`/`ADFUadfus`); that boot-ROM protocol was not reverse-engineered,
+  so whether the ROM adds a check is unconfirmed. Not flashed.
 
 ---
 
-## 3. Actiontec (RTD1295) — `install.img` — repacker STRAIGHTFORWARD (once ext4 opens)
+## 3. Actiontec (RTD1295) — `install.img` — repacker WRITTEN + round-trip BYTE-IDENTICAL (not flashed)
 
-It's a GNU tar driven by `config.txt`, `secure_boot=0`, empty signature. To
-rebuild: untar, modify `rootfs.ext4.bin` (ext4), re-tar in the same order.
-**Blocker:** the system p7zip 17.05 can't open `rootfs.ext4.bin` (calls it ELF).
-Fix by using a newer extractor or a Linux loopback mount / `debugfs` to edit the
-ext4 directly; no format reverse-engineering needed. The presence of GOLD rescue
-images means a bad flash is recoverable, which makes this a good first
-custom-code experiment.
+`tools/act_install_repack.py` rebuilds it. The container is **GNU tar + a
+32-byte ASCII-hex MD5 trailer** (see firmware-components.md §4): the last 32
+bytes are `md5(bytes[0:177213440])`, the sole integrity gate (`secure_boot=0`,
+empty `signature`, no `verify=`/`checksum=` tokens, so the signature/`do_sha256`
+path in `install_a` is off).
+
+**Repack method — in-place splice (strongest guarantee).** Don't re-tar (GNU
+metadata would drift). Instead splice the edited `rootfs.ext4.bin` into the
+original tar at its exact data offset (`12366848`, length `112051200`) and
+recompute only the MD5 trailer. Every other byte is then identical to the
+source.
+
+- **Round-trip PROVEN byte-identical:** splicing the *unmodified* rootfs back
+  and recomputing the trailer reproduces the source exactly (SHA256
+  `20de0ab4…`, `cmp` clean, MD5 trailer `7a28d01a…` reproduced). For a modified
+  build the diff is provably confined to the ext4 region + the 32-byte trailer
+  (verified: 0 differing bytes elsewhere; tar member list/order/sizes identical).
+- **Edit the ext4 without resizing.** `mount -o loop,rw` (or `debugfs`) under
+  Docker; the image file length stays `112051200` so the splice and all later
+  tar headers remain valid. `e2fsck -fn` clean before and after. (System p7zip
+  17.05 misreads the ext4 as ELF — use loopback/debugfs.)
+
+**Rooting (feature c) — done, image built.** The rootfs is **BusyBox Linux, not
+Android** (no adbd/props — see §4). Root was delivered the Linux way: add
+`/etc/init.d/S98adbroot` (0755 root) which launches `telnetd -l /bin/sh -p 1023`
+from `rcS` at boot — an always-on, unauthenticated **root shell** on TCP 1023
+(the adbd-as-root analog), persistent on the flashed rootfs. The stock image is
+already open too (empty root password; telnet :23; serial getty). Built artifact:
+`dist/actiontec/install.img` (+ `MANIFEST.txt`, `S98adbroot`), SHA256
+`08a6bf33…`. **No dm-verity** (plain ext2/ext4, remounted ro) so editing `/`
+needs no hash-tree fixup; **GOLD rescue** images in the package make a bad flash
+recoverable. Not yet flashed to hardware.
 
 ---
 
@@ -206,6 +320,32 @@ on-chip 8051. TI's GUI does "Complete Image Download, Skip Boot Loader Area
 the riskiest. Not needed for any current feature target, so parked.
 
 ---
+
+## Versioning & anti-rollback (checked 2026-10-11)
+
+All three flashable images carry **descriptive** version strings but enforce
+**none** of them — every flash gate is an integrity checksum, so downgrade and
+same-version re-install are both accepted (good for recovery and for our
+same-identity patched images):
+
+- **Scaler `MERGE.bin`** — build dates `Feb/Jun/Jul 2017`; model/version shown
+  via `>>version=[%x]`. Flash gate = whole-file **CRC-32** (poly 0x4c11db7), no
+  version compare. `FUN_ram_001f83e5` (refs `FW version (main)/(sub) changed!`)
+  reads a stored *settings* stamp (`'R',0x92,0x18,0x01`) and, on mismatch,
+  resets user settings to defaults — it is a settings-schema check, **not** a
+  flash gate. Keeping stock version identity means saved settings survive.
+- **Network `ACTUPGRADE.bin`** — `-M0R001`, `6.0.0.0`/`1.0.0.0` (EZCast web
+  assets). Gate = 4-byte additive sum. No version check (validated: repack
+  flashed & booted on hardware).
+- **Actiontec `install.img`** — installer banner `VERSION:%s` / `DHC install_a
+  (JH version)`. Gate = tar + MD5. `install_a` also checks a *boottable-format*
+  version (`Wrong boottable version`) — a struct-format check, not a release
+  check; unchanged by our rootfs-only edit.
+
+Caveat: an in-menu updater (if used) might key a "already up to date / skip"
+decision off the version string; since patches keep stock identity it could
+decline. The raw USB download-mode / USB-file paths do not compare versions.
+A display-only version bump is possible size-neutrally if ever wanted.
 
 ## Suggested order of work
 

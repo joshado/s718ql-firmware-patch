@@ -1,0 +1,6 @@
+# Feature b: fix the "unplg" typo WITHOUT growing the string (no OSD table rebuild).
+# Reword "DO NOT unplg" -> "NEVER unplug" (both 12 glyphs) in the cooling-warning
+# string. Format: RAM_addr  expect_hex  replace_hex  (RAM = 0x183800 + dec_offset).
+# String: "NOTE:For proper cooling\nplease DO NOT unplg the power cord"
+#      -> "NOTE:For proper cooling\nplease NEVER unplug the power cord"
+0x2efe58 1d280127282d014841433f3a 271e2f1e2b014841433f483a

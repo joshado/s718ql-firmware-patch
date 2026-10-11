@@ -103,21 +103,29 @@ def shift_tel_offsets(prefix, fend, delta):
     return bytes(pre)
 
 
-def repack(orig, new_ap=None):
-    """Rebuild MERGE.bin. new_ap=None (or == current AP) -> byte-identical passthrough."""
+def repack(orig, new_ap=None, new_prefix=None):
+    """Rebuild MERGE.bin.
+
+    new_ap=None & new_prefix=None -> byte-identical passthrough (reuses deflate).
+    new_prefix lets a patch edit the uncompressed AP prefix (e.g. a code cave in
+    its unused padding); it stays 0x3800 bytes. new_ap re-DEFLATEs a modified AP.
+    Either way all framing/checksums are recomputed and TEL offsets fixed up."""
     p = parse(orig)
     fstart = p["fstart"]
-    prefix = orig[fstart:p["stream_start"]]          # 0x3800, uncompressed (holds the TEL table)
+    prefix = bytes(new_prefix) if new_prefix is not None else orig[fstart:p["stream_start"]]
+    assert len(prefix) == AP_PREFIX, f"prefix must stay {AP_PREFIX:#x} bytes"
 
     if new_ap is None or new_ap == p["ap"]:
-        deflate = orig[p["stream_start"]:p["stream_end"]]  # reuse verbatim -> identical
+        deflate = orig[p["stream_start"]:p["stream_end"]]  # AP unchanged -> reuse verbatim
         decomp_size = p["size"]
     else:
         deflate = raw_deflate(new_ap)
         decomp_size = len(new_ap)
-        # the AP region = prefix + deflate + 6; if deflate grew, the tail shifts by
-        # exactly that much, so fix up the absolute TEL resource offsets to match.
-        new_fend_tmp = fstart + len(prefix) + len(deflate) + 6
+
+    # The AP region = prefix + deflate + 6; if the deflate size changed, the whole
+    # tail shifts, so fix up the absolute TEL resource offsets by the same delta.
+    new_fend_tmp = fstart + len(prefix) + len(deflate) + 6
+    if new_fend_tmp != p["fend"]:
         prefix = shift_tel_offsets(prefix, p["fend"], new_fend_tmp - p["fend"])
 
     body = prefix + deflate                           # the CRC-16 covers [fstart:stream_end]
