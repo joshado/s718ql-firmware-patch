@@ -107,16 +107,26 @@ location cannot reach it.
   address** and its per-language table isn't statically locatable (computed at
   runtime from base+language+screen-id).
 
+**Caveat — no colour-setting code has been found.** A "mute/frame-colour
+register" or colour field is a *hypothesis* (from the mask inference), **not a
+located fact**. `Enable Frame Color` (`0x2aacf9`) is a string whose code we
+never found; no RGB constant, colour field or register write for the background
+has been identified. (Note: `0x2da620` is the OSD **string-table base**, not a
+colour — it is not a lead for this.)
+
 *Realistic ways forward:* (1) a proper **flow-based** disassembler with
 function-pointer/jump-table detection (replace the blind sweep) to recover the
-indirect call graph; (2) **dynamic** analysis on hardware (watch the no-signal
-path run); or (3) pivot to finding the **mute/frame-colour register write**
-directly (the `0x2da620`/state-struct colour fields) rather than via the OSD
-message. The second data-flow lead still stands: `FUN_ram_001c7c3d` dumps the
-mute-logo/colour state from a struct (`[r10+0xa34]`, fields near `+0xcf2`);
-trace those fields to their writer.
+indirect call graph and reach the no-signal handler; (2) **dynamic** analysis on
+hardware (watch the no-signal path run); (3) find and read the code behind
+`Enable Frame Color` and the logo/mute subsystem to learn whether the background
+is a register, a struct field, or something else — i.e. establish the mechanism
+before assuming a "colour register" exists. The one weak concrete thread:
+`FUN_ram_001c7c3d` dumps a state struct (`[r10+0xa34]`, fields near `+0xcf2`)
+printing labels incl. `Mute BMP Logo!`, but none of those fields is confirmed to
+be a background colour.
 
-Changing the value, once found, is still a small patch (container gates solved).
+If a settable colour value is eventually found, changing it is a small patch
+(container gates solved) — but that "if" is not yet established.
 
 ## (c) Root on the two Linux systems — genuinely easy
 
