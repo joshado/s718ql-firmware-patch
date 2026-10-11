@@ -1,4 +1,8 @@
 # Curated symbol table for the MStar MST9U (AEON) scaler AP.
+# !!! STALE: these addresses were derived with the wrong load base (decompressed
+# at 0x180000). The correct base is the COMBINED image (prefix+decompressed) at
+# 0x180000, i.e. function addresses here are ~0x3800 LOW. Rebuild against a fresh
+# regen.sh dump before trusting. Kept for reference only.
 # Our own annotations (not vendor symbols) — edit freely and re-run regen.sh.
 # Format:  addr <TAB> kind(func|data) <TAB> name <TAB> comment(optional)
 # Addresses are RAM (image loaded at 0x180000). Applied AFTER the auto namer,

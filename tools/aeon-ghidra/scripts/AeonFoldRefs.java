@@ -24,7 +24,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 
 public class AeonFoldRefs extends GhidraScript {
-    static final long IMG_LO = 0x180000L, IMG_HI = 0x302000L;  // loaded image + BSS
+    static final long IMG_LO = 0x180000L, IMG_HI = 0x305000L;  // prefix + inflated image
     static final long DATA_LO = 0x209c80L;                     // above the main code
 
     public void run() throws Exception {

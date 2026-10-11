@@ -161,6 +161,19 @@ load at base **`0x180000`** (the header's `ap_ram_start`). The reset/exception
 vectors are at the start of the AP prefix (`0x180100`). The DSP/SIMD pseudo-ops
 and the unresolved table mapping (below) are the known gaps.
 
+**LOAD BASE — critical.** The RAM image is the **0x3800 uncompressed prefix**
+(`ap_prefix.bin`) **followed by** the inflated stream (`ap_decompressed.bin`).
+So the inflated stream loads at RAM **`0x183800`**, not `0x180000`. Analysing
+`ap_decompressed.bin` alone at `0x180000` puts **every absolute address off by
+`0x3800`** — which is why, for most of this analysis, string/table/jump-table
+references never resolved (they pointed `0x3800` low, into the wrong bytes). The
+fix is to analyse the **combined image** `ap_prefix.bin + ap_decompressed.bin`
+at `0x180000` (regen.sh builds `ap_combined.bin` and does this). With it, jump
+tables resolve (16/16 valid targets), scaler **register writes** become visible,
+and string-referencing functions jump from 102 to 275 (auto-named 14 -> 47).
+NOTE: all addresses recorded before this fix (incl. much of this doc and
+symbols.tsv) are `0x3800` low and are being rebuilt.
+
 **Disassembly coverage (flow-based).** `tools/aeon-ghidra/scripts/AeonFlowDisasm.java`
 discovers code by flow, not by blind sweep: it finds function entries by AEON
 **prologue** (`b.addi r1,r1,-N` + `b.sw D(r1),r9`, checked with the

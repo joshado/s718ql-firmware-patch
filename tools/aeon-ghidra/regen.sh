@@ -16,7 +16,14 @@
 #   symbols_dump.tsv         all user-defined names after apply (round-trip capture)
 set -euo pipefail
 
-bin="${1:-firmware/unpacked/scaler/ap_decompressed.bin}"
+bin="${1:-firmware/unpacked/scaler/ap_combined.bin}"
+# The RAM image is the 0x3800 uncompressed prefix + the inflated stream. Loading
+# the inflated stream alone at 0x180000 puts every absolute address off by 0x3800
+# (the prefix size), so build/refresh the combined image here.
+sd="firmware/unpacked/scaler"
+if [ ! -f "$sd/ap_combined.bin" ] || [ "$sd/ap_decompressed.bin" -nt "$sd/ap_combined.bin" ]; then
+  cat "$sd/ap_prefix.bin" "$sd/ap_decompressed.bin" > "$sd/ap_combined.bin"
+fi
 base="${2:-0x180000}"
 dstart="${3:-0x180000}"
 dend="${4:-0x230000}"
