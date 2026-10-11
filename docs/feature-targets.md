@@ -87,17 +87,34 @@ renderer. `Enable Frame Color` (`0x2aacf9`) is not constructed anywhere in the
 no-signal renderer / colour fill has **no debug string to anchor on**; string
 location cannot reach it.
 
-*Real next step (two leads, both data-flow not strings):*
-1. **Via the OSD message** (the better hook): the no-signal screen shows a
-   glyph message drawn through the **i18n string engine** — a per-language table
-   indexed by `state[+0x47b]`, with the shared show function `0x219504` (see
-   firmware-components.md, "OSD string engine / i18n"). Find the no-signal
-   wrapper among the ~8 callers of `0x219504` (the `0x1e9a69`-`0x1e9dd1` cluster
-   is the likely one), then trace its callers back to the no-signal detection
-   handler — where the blue background fill lives. **In progress.**
-2. **Via the state dump**: `FUN_ram_001c7c3d` reads the mute-logo/colour state
-   from a struct (`[r10+0xa34]` base, byte fields near `+0xcf2`); the renderer
-   reads/writes the same fields — trace those to the writer.
+*Trace so far (via the OSD message path).* Decompiled the engine and wrappers:
+- `0x219504` is the glyph **renderer** (7 params; `param_2` = glyph string,
+  `param_3` = length). 8 call sites.
+- `0x1e9d6d` is a **show-by-id helper**: it copies an **ASCII** string through
+  `FUN_ram_001e9942` (ASCII→glyph transform) and renders it. 8 callers.
+- Wrappers `0x1e9de9` / `0x1e9f2d` / `0x1ea0c7` pick a message **id**
+  (`0xde`, `0xf5`/`0xd0`, `0xf0`/`0xc2`, `0xe8`) by input **source**
+  (`DAT_ram_0030f6d8`) and **state** (`DAT_ram_00307b98`), rendering ASCII
+  labels from the `0x2b28xx` region.
+
+*Where it's blocked.* Two walls, both from the analysis, not the chip:
+- Those source-select wrappers have **no static callers** (no `b.jal`/`b.j`, not
+  in any findable function-pointer table) — the no-signal screen is reached by
+  **indirect dispatch**, which static analysis can't resolve here. The
+  blind-sweep coverage also gives unreliable function boundaries, so the call
+  graph for indirect/table-driven paths is incomplete.
+- The pre-encoded no-signal **glyph** string (`0x2ecd94`) is **not referenced by
+  address** and its per-language table isn't statically locatable (computed at
+  runtime from base+language+screen-id).
+
+*Realistic ways forward:* (1) a proper **flow-based** disassembler with
+function-pointer/jump-table detection (replace the blind sweep) to recover the
+indirect call graph; (2) **dynamic** analysis on hardware (watch the no-signal
+path run); or (3) pivot to finding the **mute/frame-colour register write**
+directly (the `0x2da620`/state-struct colour fields) rather than via the OSD
+message. The second data-flow lead still stands: `FUN_ram_001c7c3d` dumps the
+mute-logo/colour state from a struct (`[r10+0xa34]`, fields near `+0xcf2`);
+trace those fields to their writer.
 
 Changing the value, once found, is still a small patch (container gates solved).
 
