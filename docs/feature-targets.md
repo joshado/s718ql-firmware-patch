@@ -18,6 +18,12 @@ disassembly needed, "code edit" = needs the target's ISA.
 
 ## (b) The `unplg` typo — most tractable; start here
 
+> **Correction:** the text is not ciphered. It is stored as OSD font glyph
+> indices (`A`–`Z` = `0x1A`–`0x33`, `a`–`z` = `0x34`–`0x4D`, space = `0x01`,
+> terminator = `0x00`); see firmware-components.md, "Menu text encoding". The
+> "+45 shift" below is just the lowercase range of that map. The word is at
+> `0x16C65F` in `ap_decompressed.bin` and there is no slack byte after it.
+
 **Confirmed located.** The OSD/message strings in the scaler AP are stored with
 a per-block **additive character cipher** (not ASCII). The main multilingual
 message block decodes with a **+45** shift. At `ap_decompressed.bin` offset

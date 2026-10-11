@@ -76,23 +76,58 @@ S718QL`, keystone (`dvOmnitek_*Keystone_Write` → an **Omnitek** warp block),
 `PowerOffSystem`, `enter ePM_POWER_DPMS`, logo-capture functions, and the USB
 upgrade engine (`MW_UsbDownload_*`, `MERGE.BIN`, `Merge2.bin`).
 
-### String encoding quirk (important for features a & b)
-Human-readable **menu/OSD strings are stored with a per-character additive
-offset**, not plain ASCII — `tools/strsearch.py` won't find them, but a
-constant-delta search does. Observed:
-- The big English/German/French/Spanish menu+message block decodes with
-  **+45** (e.g. raw bytes at `0x16c65f` in `ap_decompressed.bin` → `...Press
-  Power Button to Turn Off Projector ... NOT ... please DO NOT unplg the power
-  cord while the projector fan is still running ...`). **This is the `unplg`
-  typo (feature b).**
-- A second block (Spanish/French, around `0x164c84`) decodes with **+71**.
+### Layout of the decompressed AP (`ap_decompressed.bin`, 0x181560 bytes)
 
-So the OSD text table is obfuscated by a simple Caesar-style shift (the shift
-differs per block/font). The strings are fixed-length-ish and null-separated.
-`unplg` is 5 chars where `unplug` is 6 — fixing it needs an extra character, so
-it's not a pure in-place byte edit unless there's slack after the word
-(there appears to be a separator, TBD). Details and the exact edit plan are in
-[`feature-targets.md`](feature-targets.md).
+From a statistical survey (entropy and text density per 16 KB block, plus spot
+samples). Boundaries are on 16 KB steps and the table labels are guesses.
+
+| Range | Size | What it looks like |
+|---|---|---|
+| `0x000000`–`0x0D0000` | 832 KB | dense binary, almost no text: program code |
+| `0x0D0000`–`0x0F0000` | 128 KB | numeric tables; starts with a smoothly rising u16 series (a curve / LUT), then mostly zeros |
+| `0x0F0000`–`0x108000` | 96 KB | dense binary, lower entropy than code: tables or initialised data |
+| `0x108000`–`0x124000` | 112 KB | sparse records of small values with `00`/`FF` padding: config / register tables |
+| `0x124000`–`0x134000` | 64 KB | plain ASCII debug, log and error strings (~1,200) |
+| `0x134000`–`0x14C000` | 96 KB | mixed tables |
+| `0x14C000`–`0x164000` | 96 KB | table data; parts look like packed bitmaps / glyphs |
+| `0x164000`–`0x170000` | 48 KB | on-screen menu text, all languages, as glyph indices (below) |
+| `0x170000`–`0x180000` | 64 KB | bit patterns that look like font glyphs, plus character-map tables |
+| `0x180000`–`0x181560` | 5 KB | trailing data incl. templates `Dell xxxxxx`, `00.00000.000` |
+
+The header's RAM range (`0x180000`–`0x209C79`) is far smaller than this blob,
+so those fields do not simply describe where the whole AP sits. Unexplained.
+
+### Menu text encoding (important for features a & b)
+
+Menu/OSD strings are **not obfuscated**. They are stored as **glyph indices
+into the OSD font**, not as ASCII, which is why `tools/strsearch.py` misses
+them. Earlier notes described this as a "+45 additive cipher"; that is only
+what the lowercase range happens to look like. The map, confirmed by encoding
+known phrases and finding each exactly once in the image:
+
+| Raw byte | Meaning |
+|---|---|
+| `0x00` | string terminator |
+| `0x01` | space |
+| `0x0A` | line break within a message |
+| `0x16` | `:` |
+| `0x1A`–`0x33` | `A`–`Z` (ASCII − 39) |
+| `0x34`–`0x4D` | `a`–`z` (ASCII − 45) |
+| `0x5B`, `0x5D`, `0x6B`, … | accented letters (`é`, `ó`, `ä`, …) |
+| not yet mapped | digits, remaining punctuation, CJK and other scripts (multi-byte sequences with `0xFF` appear in those sections) |
+
+Located with this map: `Press Power Button to Turn Off Projector` at
+`0x16C610`, `…please DO NOT unplg the power cord` at `0x16C651` (**the `unplg`
+typo, feature b**, word at `0x16C65F`), `White Screen` at `0x16C6A7`,
+`Language` at `0x164BB6`. Strings are null-terminated and packed back to back,
+language after language (English, then Spanish, …), so `unplg` → `unplug`
+still needs one extra byte: there is no slack after the word. Short records
+that look like an index (`.. FC 55`, `.. FD 55`) sit just before the message
+block; whether strings are found by pointer or by counting terminators is not
+yet known and decides how a length change must be done.
+
+The "+71 block" in earlier notes is not confirmed: the one block that scores
+as text under +71 (`0x140000`) decodes to noise.
 
 ---
 
