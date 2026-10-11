@@ -38,6 +38,7 @@ firmware/
     mcu/           NXP + Nuvoton microcontroller images as flat binaries
 tools/           our scripts (see below); kept separate from untrusted data
 docs/            the writeups
+decompiled/      hand-decompiled C for reading (not buildable, not verified)
 ```
 
 > **Safety note on handling the images.** The contents of `firmware/extracted`
@@ -53,6 +54,9 @@ docs/            the writeups
 | `tools/mst9u_merge.py` | Parse/split `MERGE.bin`; verify its CRC-16 + CRC-32 | **round-trips checksums** |
 | `tools/act_unpack.py` | Split `ACTUPGRADE.bin` into its component records | working |
 | `tools/strsearch.py` | Search blobs for text in ASCII/UTF-16LE/UTF-16BE | working |
+| `tools/nxp_disasm.py` | Recursive-descent Thumb disassembly of the NXP MCU image (needs `capstone`) | working |
+| `tools/nxp_trace.py` | Condense that listing into per-function GPIO/delay/call traces | working |
+| `tools/nxp_initdata.py` | Decompress the NXP app's `.data` initialisers | working |
 
 ## Documentation
 
@@ -64,6 +68,8 @@ docs/            the writeups
   (what's solved, what's still open).
 - [`docs/feature-targets.md`](docs/feature-targets.md) — the wishlist and where
   in the firmware each item actually lives.
+- [`docs/nxp-mcu.md`](docs/nxp-mcu.md) — NXP system MCU disassembly notes: pin
+  map, settings block, power state machine, standby modes and WoL.
 
 ## Current state (high level)
 
@@ -76,8 +82,10 @@ docs/            the writeups
   Filesystems extract cleanly.
 - **Actiontec (`install.img`)** — plain tar, `secure_boot=0`. Android/Linux on
   Realtek RTD1295 (ARM64), the ScreenBeam wireless-display subsystem.
-- **DDP, NXP MCU, Nuvoton MCU** — identified and strings-mined; internals not
-  yet mapped.
+- **NXP MCU** — application disassembled; power state machine, standby modes
+  and the built-in PHY Wake-on-LAN path mapped (see `docs/nxp-mcu.md`).
+- **DDP, Nuvoton MCU** — identified and strings-mined; internals not yet
+  mapped.
 
 Nothing has been repacked or flashed yet. All findings so far are from static
 analysis of the images only.

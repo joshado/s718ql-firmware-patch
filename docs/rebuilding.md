@@ -90,14 +90,59 @@ the config bits / LDROM).
 
 ---
 
-## 5. NXP LPC11U67 — `.hex` — repack PLAUSIBLE
+## 5. NXP LPC11U67 — `.hex` — PATCHABLE; recovery path understood (untested)
 
 Standard Intel HEX of a Cortex-M0 image with a resident **BootCode** at 0x0 and
-app at 0x2000. Rebuild = modify the app region, regenerate the HEX (keep the
-0x1ff00 config word). Standard ARM, fully analysable. The resident bootloader
-means the app can be reflashed over RS232 and is the recovery path — **do not
-overwrite the 0x0–0x2000 BootCode region.** This is the right place to analyse
-features d/f at the source level.
+app at 0x2000. The app is fully disassembled and hand-decompiled
+([nxp-mcu.md](nxp-mcu.md), `decompiled/nxp_app.c`). Everything below is from
+static analysis; nothing has been flashed.
+
+**Why a bad app flash should be recoverable** (details in nxp-mcu.md,
+"BootCode, recovery and debug access"):
+
+- Download mode is entered by the BootCode itself (hold Power while applying
+  AC), before the app runs, so a hung or crashing app can still be replaced.
+- The BootCode's serial updater only ever erases `0x2000`–`0x1ffff`; it cannot
+  erase itself.
+- An "app valid" byte at `0x1ff00` is written last; without it the BootCode
+  erases the app area and waits for an update.
+- The jump-to-app path checks only that the reset vector is in range — no app
+  checksum was found there. The update protocol (`0xfca`) has not been read
+  yet, so a transfer-level checksum is still possible.
+- Code read protection is off, so SWD and NXP's mask-ROM ISP (P0_1 low at
+  reset) are available as deeper fallbacks **if** those pins can be reached on
+  the board. Not checked.
+
+**What is still dangerous:** the MCU sequences supply rails, fans and laser
+enables. A wrong patch can mis-sequence real hardware even though the MCU
+itself stays recoverable, and the BootCode raises some rails in update mode
+too.
+
+**Do not** program the `.hex` verbatim with an SWD tool: its vector checksum
+slot at `0x1c` is zero, so its BootCode region is not what a working chip
+holds. Keep to the app region, and **do not overwrite `0x0`–`0x2000`.**
+
+**How to build a modified image — recommended: patch + hooks.** Keep the
+original binary. Apply small byte patches (the candidates are tabulated in
+nxp-mcu.md), and put any new logic in C compiled with `arm-none-eabi-gcc`
+(`-mcpu=cortex-m0 -mthumb`), linked into the empty flash above `0x9a00` and
+reached by redirecting an existing `bl`. Then merge back into a `.hex` keeping
+the `0x1ff00` config record. Only the code we wrote is new. Still to write:
+the linker script, the merge/hex script, and a flasher (Dell's
+`PIC_NXP_Downloader.exe` is a small .NET program, so its protocol should be
+readable).
+
+**Not recommended: recompiling `decompiled/nxp_app.c`.** It is hand-decompiled
+and unverified, and a different compiler emits different code, so there is
+nothing to diff against. The way to make whole-program recompilation
+trustworthy is a *matching* decompilation: the original looks like an
+unoptimised Keil ARMCC build, so compiling function by function with the same
+compiler and comparing bytes would prove equivalence. The app is ~31 KB, just
+under the 32 KB limit of Keil's free edition (Windows only). Large effort.
+
+**Debugging:** the app has no log output at all. Visibility comes from SWD (if
+reachable), from code we add (e.g. a trace routine on a spare UART), or from
+running the image in an emulator with stubbed peripherals before flashing.
 
 ---
 

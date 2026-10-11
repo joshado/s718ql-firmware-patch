@@ -135,6 +135,16 @@ Assistant. Steps:
 
 This is high-effort but every piece is in a processor we can already open.
 
+**Update after disassembling the NXP MCU** ([nxp-mcu.md](nxp-mcu.md)): the MCU
+does not unconditionally cut the network side. It has three standby flavours
+selected by EEPROM settings — eco (standby rails off), normal (rails left on,
+USART1 kept alive and able to wake the MCU) and WoL (the MCU bit-bangs MDIO to
+arm magic-packet wake in the Ethernet PHY and watches its PME pin). So the
+first steps are experiments, not patches: find which mode the unit is in, try a
+magic packet, and check whether the AM8250 suspends itself. Two 4-byte patch
+points (force normal standby; stop the MCU taking over the PHY) are documented
+there if the MCU does turn out to be the blocker.
+
 ---
 
 ## (e) HDMI-CEC — stretch
