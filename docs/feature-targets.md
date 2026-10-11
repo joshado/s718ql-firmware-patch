@@ -77,19 +77,22 @@ background (blue) and foreground (white) as separate colour parameters. It is
 the only explanation consistent with the evidence above, but the actual drawing
 code has not been read.
 
-*Why not verified — disassembly is incomplete.* Our Ghidra AEON disassembly
-covers only **~35%** of the code region (193 KB of `0x89c79`; instruction span
-ends at `0x225adb`). Ghidra disassembled only entry-reachable functions; ~65% of
-the code — almost certainly including the `Mute BMP Logo!` draw and the frame-
-colour fill — was never disassembled. A Python constant-fold over the listing
-finds refs to `DefCool_RedColor` and the logo pref, but **none** to
-`Mute BMP Logo!` or `Enable Frame Color`, consistent with that code being
-outside the analysed set.
+*Coverage pass done; renderer is string-less.* After exhaustive disassembly
+(`DisassembleCodeRegion.java`, 35%->full, 2,690 functions) the ref search does
+find `Mute BMP Logo!` — but in `FUN_ram_001c7c3d`, a **debug-dump routine**: a
+repeating `load state field -> DbgPrint(label, value)` (printer at `0x1c59a3`)
+that prints `Mute BMP Logo!`, logo and other state with labels. It is **not** the
+renderer. `Enable Frame Color` (`0x2aacf9`) is not constructed anywhere in the
+(now full) code — it is dead or reached via a pointer table. So the actual
+no-signal renderer / colour fill has **no debug string to anchor on**; string
+location cannot reach it.
 
-*Real next step:* force exhaustive disassembly of the whole code region
-(aggressive instruction finder / disassemble-all-undefined), then re-run the ref
-search. Only then can the mechanism and the colour value be confirmed. Changing
-the value, once found, remains a small patch (container gates all solved).
+*Real next step (data-flow, not strings):* the dump at `FUN_ram_001c7c3d` reads
+the mute-logo/colour state from a struct (`[r10+0xa34]` base, byte fields near
+`+0xcf2..`); the renderer reads/writes the same fields. Trace those field
+addresses to the writer, or trace the no-signal state machine forward to the
+fill. This is manual data-flow RE. Changing the value, once found, is still a
+small patch (container gates solved).
 
 ## (c) Root on the two Linux systems — genuinely easy
 
