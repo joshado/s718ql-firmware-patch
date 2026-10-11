@@ -38,10 +38,20 @@ decode cleanly.
   always big-endian, so code decodes correctly. The core's data is big-endian
   too (OpenRISC-derived); the little-endian values in `MERGE.bin`'s container
   header are the container's, not the AP's.
-- **Decompiler:** this image has no `linux_arm_64` decompiler native, so
-  Ghidra's C decompiler is unavailable (disassembly is not affected). To get it,
-  build the native in-container or run the image under `--platform linux/amd64`
-  (slower, via emulation).
+- **Decompiler (C output):** the arm64 image has no decompiler native, but the
+  Ghidra distribution ships the `linux_x86_64` one, so an **amd64 image run
+  under emulation** decompiles fine (verified). Build and use:
+
+  ```sh
+  AEON_PLATFORM=linux/amd64 AEON_IMAGE=aeon-ghidra:amd64 tools/aeon-ghidra/build.sh
+  tools/aeon-ghidra/decomp.sh firmware/unpacked/scaler/ap_decompressed.bin 0x180000 0x180800 0x180900
+  # -> firmware/unpacked/scaler/ap_decompressed.bin.aeon.c
+  ```
+
+  Emulation makes it slow, so `decomp.sh <binary> [base] [start] [end]` takes an
+  optional hex address range — decompile a region, not the whole 956 functions.
+  Expect `WARN ... non-existing memory` for `movhi` targets in the unmapped BSS
+  past the image; those are warnings, not failures.
 - **Memory map:** `b.movhi` targets reach past `0x209c79` (e.g. ~`0x309f7c`),
   i.e. the whole decompressed blob is addressed from `0x180000` upward with BSS
   beyond it. Resolving the exact table/string mapping is follow-up work; see

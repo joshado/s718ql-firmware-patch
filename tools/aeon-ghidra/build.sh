@@ -6,6 +6,10 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 cache="${AEON_CACHE:-$HOME/.cache/aeon-ghidra}"
 image="${AEON_IMAGE:-aeon-ghidra}"
+# Build native-arch by default. Set AEON_PLATFORM=linux/amd64 for an emulated
+# image whose x86_64 decompiler native works (arm64 Ghidra ships no decompiler).
+platform_arg=()
+[ -n "${AEON_PLATFORM:-}" ] && platform_arg=(--platform "$AEON_PLATFORM")
 
 GHIDRA_URL="https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.3_build/ghidra_12.1.3_PUBLIC_20260817.zip"
 GHIDRA_SHA="93a5d11a9ad510622acaaf908c556a7b9b764d338e78a7567f3689bf5081fd54"
@@ -32,6 +36,6 @@ cp "$here/Dockerfile" "$ctx/"
 cp -r "$here/scripts" "$ctx/"
 cp "$cache/ghidra.zip" "$cache/aeon.zip" "$ctx/"
 
-echo "building image: $image"
-docker build -t "$image" "$ctx"
+echo "building image: $image ${AEON_PLATFORM:+($AEON_PLATFORM)}"
+docker build "${platform_arg[@]}" -t "$image" "$ctx"
 echo "done: $image"

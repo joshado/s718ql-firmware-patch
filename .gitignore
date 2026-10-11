@@ -6,4 +6,5 @@ firmware/
 
 # Ghidra-generated listings and build caches
 **/*.aeon.asm
+**/*.aeon.c
 tools/aeon-ghidra/*.zip
