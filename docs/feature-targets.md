@@ -154,10 +154,24 @@ signal is lost with a menu open, not the normal case.)*
 **To change the blue — three options, best first:**
 1. **Code patch (robust, universal — recommended).** Inject one colour write at
    the top of `osd_nosig_draw` (`0x1dbc84`, file off `0x5dc84`), which runs on
-   every no-signal draw: `scaler_reg_write24(0x90102f33, R | G<<8 | B<<16)` (e.g.
-   red = `0x0000FF`, green = `0x00FF00`, original blue = `0xFF0000`) or
-   `osd_set_bg_color_332(0, <packed-3-3-2>)` (`0xe0`=red, `0x1c`=green, `0x03`=blue,
-   `0x00`=black, `0xff`=white). Needs AEON code injection + repack (both solved).
+   every no-signal draw. **Use `osd_set_bg_color_332(0, <packed-3-3-2>)`**
+   (`0xe0`=red, `0x1c`=green, `0x03`=blue, `0x00`=black, `0xff`=white) — NOT a
+   bare `scaler_reg_write24(0x90102f33, …)`. Needs AEON code injection + repack
+   (both solved); implemented as the `0x182048` cave (feature-a-nosig-red.lst).
+
+   **HARDWARE RESULT (2026-10-11):**
+   - **v1 — `scaler_reg_write24(0x90102f33, 0xff)` (bare poke): FAILED.** Flashed
+     fine, feature-b visible, but the no-signal screen stayed blue. Root cause:
+     the *visible* free-run background is driven by **per-window** background
+     MMIO registers (written by `osd_set_bg_color_332` via `scaler_mmio_write_byte`
+     to each `g_window_ctx` entry) plus the `FUN_ram_001c63ce` window-priority
+     latch. `0x90102f33` alone is necessary but **not sufficient** — the
+     per-window regs still held blue, so nothing changed on screen.
+   - **v2 — `osd_set_bg_color_332(0, 0xe0)` (red): BUILT, statically verified,
+     awaiting hardware confirm.** Replicates the exact sequence the firmware uses
+     to paint the menu white (`osd_set_bg_color_332(0,0xff)`): per-window bg regs
+     + frame reg + latch. Cave re-disassembled: calls `0x1be86b`, returns to
+     `0x1dbc8c`, displaced prologue resumes `osd_nosig_draw` correctly.
 2. **Limited data edit (menu path only).** Change the `0xff` immediate in
    `osd_set_bg_color_332(0,0xff)` at line 76483 to a packed-3-3-2 value — a pure
    data edit, but only affects the "signal lost with menu open" case, so it is not

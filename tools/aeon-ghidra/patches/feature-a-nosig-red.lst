@@ -1,17 +1,20 @@
 # Feature a: force the no-signal background to RED (255,0,0).
 # Hook osd_nosig_draw (0x1dbc84): overwrite its first 8 bytes with a jump to a
-# cave in the unused AP-prefix padding (0x182048). The cave writes the free-run
-# frame-colour register (0x90102f33) = 0x0000ff (R=0xff,G=0,B=0 -> red), restores
-# regs, runs the 3 displaced prologue instructions, and returns to 0x1dbc8c.
-# r9/r10 are saved/restored around the call (r3-r8/r11 are set fresh by the body).
+# cave in the unused AP-prefix padding (0x182048). The cave calls the firmware's
+# own free-run background setter osd_set_bg_color_332(0, 0xe0) -- 0xe0 = red in
+# packed 3-3-2 (the same routine the menu path calls with 0xff for white). This
+# does the FULL sequence (per-window MMIO bg registers + frame reg 0x90102f33 +
+# the FUN_ram_001c63ce window-priority latch); a bare poke of 0x90102f33 alone
+# does NOT drive the visible background (that was the v1 bug: stayed blue).
+# Then it restores regs, runs the 3 displaced prologue instructions, returns to
+# 0x1dbc8c. r9/r10 are saved/restored around the call (the callee preserves r9).
 @0x182048
 b.addi r1,r1,-0x8
 b.sw 0x4(r1),r9
 b.sw 0x0(r1),r10
-b.movhi r3,0x9010
-b.ori r3,r3,0x2f33
-b.ori r4,r0,0xff
-b.jal 0x1c64ed
+b.ori r3,r0,0x0
+b.ori r4,r0,0xe0
+b.jal 0x1be86b
 b.lwz r9,0x4(r1)
 b.lwz r10,0x0(r1)
 b.addi r1,r1,0x8
