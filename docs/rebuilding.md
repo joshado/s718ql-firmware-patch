@@ -106,9 +106,10 @@ static analysis; nothing has been flashed.
   erase itself.
 - An "app valid" byte at `0x1ff00` is written last; without it the BootCode
   erases the app area and waits for an update.
-- The jump-to-app path checks only that the reset vector is in range — no app
-  checksum was found there. The update protocol (`0xfca`) has not been read
-  yet, so a transfer-level checksum is still possible.
+- The jump-to-app path checks only that the reset vector is in range, and the
+  download protocol has no checksum either. A patched image will not be
+  rejected — and a corrupted transfer will not be detected, so a flasher
+  cannot confirm what was written.
 - Code read protection is off, so SWD and NXP's mask-ROM ISP (P0_1 low at
   reset) are available as deeper fallbacks **if** those pins can be reached on
   the board. Not checked.
@@ -128,9 +129,9 @@ nxp-mcu.md), and put any new logic in C compiled with `arm-none-eabi-gcc`
 (`-mcpu=cortex-m0 -mthumb`), linked into the empty flash above `0x9a00` and
 reached by redirecting an existing `bl`. Then merge back into a `.hex` keeping
 the `0x1ff00` config record. Only the code we wrote is new. Still to write:
-the linker script, the merge/hex script, and a flasher (Dell's
-`PIC_NXP_Downloader.exe` is a small .NET program, so its protocol should be
-readable).
+the linker script and the merge script. The flasher exists:
+`tools/nxp_flash.py` speaks the BootCode's block protocol (documented in
+nxp-mcu.md, "Serial download protocol"); it is untested on hardware.
 
 **Not recommended: recompiling `decompiled/nxp_app.c`.** It is hand-decompiled
 and unverified, and a different compiler emits different code, so there is

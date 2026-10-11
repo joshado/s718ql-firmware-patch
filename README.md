@@ -57,6 +57,7 @@ decompiled/      hand-decompiled C for reading (not buildable, not verified)
 | `tools/nxp_disasm.py` | Recursive-descent Thumb disassembly of the NXP MCU image (needs `capstone`) | working |
 | `tools/nxp_trace.py` | Condense that listing into per-function GPIO/delay/call traces | working |
 | `tools/nxp_initdata.py` | Decompress the NXP app's `.data` initialisers | working |
+| `tools/nxp_flash.py` | Flash the NXP app over RS232 (BootCode block protocol); dry-run and simulator self-test | **untested on hardware** |
 
 ## Documentation
 

@@ -134,9 +134,11 @@ three strings at `0x9958`:
 | `#00501 1\r` | query WoL enable | `P0\r` or `P1\r` |
 | anything else | | `F\r` |
 
-Who sits on the other end of USART2 is **not known**. The literal `#00500` does
+USART2 is very probably the **DB9** (the BootCode's serial download, which
+Dell's guide performs over the DB9, uses USART2 — see "Serial download
+protocol"), and it is the one UART (re)initialised on *every* entry to standby.
+So these commands are meant to be sent from outside; the literal `#00500` does
 not appear in the AM8250 rootfs, the scaler image or the Nuvoton image.
-USART2 is the one UART that is (re)initialised on *every* entry to standby.
 
 ## Power state machine [C]
 
@@ -234,9 +236,8 @@ dead in standby, one of these is true, in rough order of likelihood:
 
 ### Experiments, cheapest first (no flashing)
 
-1. On the DB9 at 19200 8N1 send `#00501 1\r`. A `P0\r` / `P1\r` answer means
-   the DB9 is USART2 and tells us the WoL flag. No answer just means the DB9 is
-   a different UART.
+1. On the DB9 at 19200 8N1, in standby, send `#00501 1\r`. The DB9 is very
+   probably USART2, so expect `P0\r` / `P1\r`: the WoL flag.
 2. Find the OSD item behind setting 3 (a standby / power-saving mode choice) and
    flip it; see whether the link LED and ping survive standby.
 3. With WoL on, send a magic packet to the projector's wired MAC.
@@ -288,9 +289,6 @@ hardware.
 sectors 2–24 (`0x164`/`0x1ae` with `(2, 0x18)`), so the serial update path
 cannot erase sectors 0–1. The update UART is 19200 baud (`0x157e`).
 
-**Not yet read:** the update protocol itself (`0xfca`) — framing, and whether
-it verifies a checksum of what it receives.
-
 **Below the BootCode** [C from the image, I for the board]:
 
 - CRP word at `0x2fc` is `0xFFFFFFFF`: no code read protection. SWD and the
@@ -311,6 +309,59 @@ it verifies a checksum of what it receives.
 text is the three `#0050x` commands and the BootCode's `Update` / `Reset` /
 `BootCode` lines. There is no serial console to tap; visibility comes from SWD
 or from code we add.
+
+## Serial download protocol
+
+Read from both ends: Dell's `PIC_NXP_Downloader.exe` (a .NET program, namespace
+`MCU_Downloader`, method `LPC11U67_Update`) and the BootCode's receive loop
+(`0x6c8`–`0x7de`). The two agree. **Not exercised on hardware.**
+`tools/nxp_flash.py` implements it and has a simulator of the device side.
+
+**Link:** 19200 8N1 on **USART2** (`0x40070000`, P1_0/P1_6), polled, no flow
+control, no timeouts on the device side. Dell's procedure uses the DB9, so
+**the DB9 is USART2** — the same UART that takes the `#0050x` and `BE EF`
+commands in standby [I, from the procedure; C that the BootCode uses USART2].
+
+**Entering it:** hold Power while applying AC and release when the LED blinks
+(BootCode mode `0x21`, key held for 40–59 polls). The BootCode then raises
+some rails (P1_25, P1_19, P1_31, P0_8), waits about 1.5 s, and only then
+starts reading the UART. Holding for 60+ polls gives mode `0x31`, which takes
+a different path (`0x622`) that has not been read.
+
+| Step | Host sends | Device replies | Device action |
+|---|---|---|---|
+| Sync | `AA 55` | `14` | device id: `0x14` = LPC11U67 (`0x13` LPC1113, `0x02`/`0x06` PIC24). **Any other first two bytes → system reset** |
+| Write | `03` + 1024 data bytes | `01` ok, `00` fail | on the first block (pointer = `0x2000`) erase sectors 2–24; then IAP copy-RAM-to-flash at the pointer; pointer += 1024 **even on failure** |
+| Run | `00` | — | jump to the app (`0xf06`) |
+| Restart | `CC` then `AA 55` | `14` | pointer back to `0x2000` |
+| other byte | | `00` | ignored |
+
+What the host does (and `nxp_flash.py` copies): parse the Intel HEX into a flat
+image filled with `0xFF`, length rounded up to 1024; send every block from
+`0x2000` to the end (capped at `0x20000`) — for the Dell file that is 120
+blocks, including all-`0xFF` ones; wait up to 5 s for each ack; send `00`.
+
+Things that follow from this [C]:
+
+- **No checksum, CRC or read-back anywhere.** The only check is the IAP
+  call's status. A corrupted byte on the wire is flashed silently.
+- **There is no address in the protocol.** Blocks land sequentially from
+  `0x2000`, so the BootCode region cannot be addressed at all, and the
+  bytes below `0x2000` in the `.hex` are never sent.
+- The "app valid" byte at `0x1ff00` is simply part of the last block. An
+  aborted transfer leaves it erased, and the next boot erases the app area
+  and waits for a download.
+- On the `00` command the BootCode jumps to the app; if the reset vector at
+  `0x2004` is out of range it blinks P2_9 forever instead (power-cycle and
+  re-enter download mode).
+- The device does not echo or time out, so a host that sends `AA 55` before
+  the BootCode is listening loses a byte (USART2 has no FIFO) and the unit
+  resets on the next mismatch. Wait for the blinking LED first.
+
+There is a second loader in the BootCode (`0x7e0` onward, parser `0xfca`)
+that takes ASCII lines beginning `U`, `R` or `:` — Intel HEX over serial, with
+the `Update` / `Reset` / `BootCode` strings. It is reached in the other boot
+modes and has not been decoded.
 
 ## Function index
 
@@ -341,8 +392,8 @@ or from code we add.
 
 ## Open questions
 
-- Does the BootCode's update protocol (`0xfca`) checksum the data it receives?
-  (The jump-to-app path does not checksum the app.)
+- The BootCode's second, ASCII/Intel-HEX loader (`0x7e0`, `0xfca`) and boot
+  mode `0x31`.
 - Are SWD (P0_10/P0_15) and the ISP pin P0_1 reachable on the board?
 - Physical mapping of USART0–4 (DB9, scaler, AM8250, RTD1295, Nuvoton). In
   `power_state_code == 3` the tasks bridge UARTs transparently (USART0 → 2,
