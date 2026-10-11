@@ -9,3 +9,11 @@
 # low). Rebuild from fresh regen.sh dumps / the auto tsv. A few base-fixed
 # anchors below, re-derived on the correct base:
 0x0021cd04	func	osd_render_glyph_string	[C] glyph renderer (was 0x219504 pre-fix, +0x3800)
+#
+# ---- OSD (RESTORED on correct base; the master-table model was right, the
+#      earlier retraction was the 0x3800 base bug) ----
+0x002a9974	data	osd_master_table	[C] screen_id -> per-language (ptr,len) table. master[4] -> no-signal screen
+0x00307b98	data	g_osd_mode	[C] current OSD screen id; ==4 is the no-input/no-signal screen
+0x002f0594	data	str_nosignal_hdmi1_en	[C] "No HDMI 1 (2.0) signal. Press <Source>..." (English); master[4][0]
+0x001e73fe	func	osd_no_input_handler	[C] no-input/no-signal state handler: sets g_osd_mode=4, branches on input flags DAT_ram_00304b88, calls scaler register writes (the blue background fill is among these)
+0x001c62f9	func	scaler_reg_write	[?] (reg,val,mask) register write; e.g. (0x101d20,0,1)

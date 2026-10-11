@@ -107,14 +107,15 @@ location cannot reach it.
   address** and its per-language table isn't statically locatable (computed at
   runtime from base+language+screen-id).
 
-**OSD render path — earlier model retracted.** The `master_table[screen_id]`
-model (via `FUN_ram_001e4aea`) is unsound: that function's "master table" base
-`0x2a9974` is a string region with no pointers, so it is likely dead/debug code
-(see firmware-components.md). Attempts to line the no-signal string tables up to
-a renderer did not produce a clean linkage — the OSD string structure is more
-tangled than per-screen `(ptr,len)` tables, and the glyph messages are reached
-indirectly by a path not yet correctly identified. The no-signal renderer /
-colour remain unlocated.
+**OSD model RESTORED + no-input screen IDENTIFIED (correct base).** The earlier
+retraction was the 0x3800 load-base bug, not a real flaw. With the combined
+image: the master table at `0x2a9974` resolves; `master[4]` is the no-signal
+screen (its English string `0x2f0594` = "No HDMI 1 (2.0) signal..."). So
+**g_osd_mode (0x307b98) == 4 is the no-input screen**. Five functions set it to
+4; the main handler is **`0x1e73fe`** (`osd_no_input_handler`) -- now readable,
+with scaler **register writes** visible (e.g. `scaler_reg_write(0x101d20,..)`).
+The blue background fill is among this handler's register-write calls -- the
+remaining step is identifying which register is the background/frame colour.
 
 **Caveat — no colour-setting code has been found.** A "mute/frame-colour
 register" or colour field is a *hypothesis* (from the mask inference), **not a
