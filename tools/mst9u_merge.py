@@ -79,11 +79,35 @@ def raw_deflate(data, level=9):
     return c.compress(data) + c.flush()
 
 
+TEL_COUNT = 0x200c   # u16 BE resource count, offset within the AP prefix
+TEL_BASE = 0x200e    # first 11-byte entry: [id:2 BE][offset:4 BE][size:4 BE][flag:1]
+
+
+def shift_tel_offsets(prefix, fend, delta):
+    """Bump every TEL resource offset that points into the tail (>= fend) by delta.
+
+    Resource offsets are ABSOLUTE MERGE.bin file offsets (used via the 0xC0000000
+    flash window), and resources sit contiguously after ap_flash_end -- so when the
+    re-deflated AP grows, each tail offset must move by the same delta or the loader
+    reads the wrong bytes (broken logo/resources). The TEL table lives in the
+    uncompressed prefix, which the AP CRC-16 and header CRC-32 re-cover."""
+    if delta == 0:
+        return prefix
+    pre = bytearray(prefix)
+    n = struct.unpack_from(">H", pre, TEL_COUNT)[0]
+    for i in range(n):
+        e = TEL_BASE + i * 0xb
+        off = struct.unpack_from(">I", pre, e + 2)[0]
+        if off >= fend:                               # a tail resource -> shift it
+            struct.pack_into(">I", pre, e + 2, off + delta)
+    return bytes(pre)
+
+
 def repack(orig, new_ap=None):
     """Rebuild MERGE.bin. new_ap=None (or == current AP) -> byte-identical passthrough."""
     p = parse(orig)
     fstart = p["fstart"]
-    prefix = orig[fstart:p["stream_start"]]          # 0x3800, never changes
+    prefix = orig[fstart:p["stream_start"]]          # 0x3800, uncompressed (holds the TEL table)
 
     if new_ap is None or new_ap == p["ap"]:
         deflate = orig[p["stream_start"]:p["stream_end"]]  # reuse verbatim -> identical
@@ -91,6 +115,10 @@ def repack(orig, new_ap=None):
     else:
         deflate = raw_deflate(new_ap)
         decomp_size = len(new_ap)
+        # the AP region = prefix + deflate + 6; if deflate grew, the tail shifts by
+        # exactly that much, so fix up the absolute TEL resource offsets to match.
+        new_fend_tmp = fstart + len(prefix) + len(deflate) + 6
+        prefix = shift_tel_offsets(prefix, p["fend"], new_fend_tmp - p["fend"])
 
     body = prefix + deflate                           # the CRC-16 covers [fstart:stream_end]
     crc16 = binascii.crc_hqx(body, 0xFFFF)
