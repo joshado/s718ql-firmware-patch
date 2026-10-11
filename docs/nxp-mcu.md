@@ -118,6 +118,12 @@ marked — it is deduced from the order things are switched in:
   `0xA0` and `eeprom_ac_ok` stays 0, which disables every WoL path. So "is
   there an EEPROM at 0xAC" is the hardware/region switch — a good candidate for
   the "EMEA models only" wording in Dell's listing [I].
+- **Likely OSD names** [I]: the scaler's Power Settings menu has `Power Mode`
+  (`Normal` / `Eco`), `Network` (`Standby On` / `Standby Off`), `Auto Shutdown`
+  and `Power On Beep`. `Power Mode` is the obvious match for setting 3
+  (0 = Normal = keep rails, non-zero = Eco). `Network` standby is probably one
+  of the other bytes (setting 2 or the WoL enable). Not traced through the
+  scaler code.
 - Settings are re-read on every power-off and again in standby
   (`0x7050`, 0.5 s in), so another processor can change them while the projector is on.
 - Other EEPROM cells: `0x3e00` (bit flags, `0x7730`), `0x3e06` (factory mode).
@@ -238,8 +244,8 @@ dead in standby, one of these is true, in rough order of likelihood:
 
 1. On the DB9 at 19200 8N1, in standby, send `#00501 1\r`. The DB9 is very
    probably USART2, so expect `P0\r` / `P1\r`: the WoL flag.
-2. Find the OSD item behind setting 3 (a standby / power-saving mode choice) and
-   flip it; see whether the link LED and ping survive standby.
+2. In the OSD, Power Settings: set `Power Mode` to `Normal` and `Network` to
+   `Standby On`; see whether the link LED and ping survive standby.
 3. With WoL on, send a magic packet to the projector's wired MAC.
 4. Meter the rails gated by P1_5 / P1_7 / P1_9 / P1_25 in standby vs on, and
    find which one feeds the AM8250 and the PHY. This settles case 4.
@@ -398,7 +404,8 @@ modes and has not been decoded.
 - Physical mapping of USART0–4 (DB9, scaler, AM8250, RTD1295, Nuvoton). In
   `power_state_code == 3` the tasks bridge UARTs transparently (USART0 → 2,
   USART4 → 2, USART2 → 1), which should help identify them.
-- What the USART0 `0xAA` device link is (a paired-device list; Bluetooth?).
+- What the USART0 `0xAA` device link is. The scaler has a `Bluetooth Settings`
+  menu (search / connect / connected device), so a Bluetooth module is likely.
 - Which rail feeds the AM8250 and the PHY.
 - Which processor writes settings 2–4 into the `0xAC` EEPROM, and the OSD names.
 - Binary frame format on USART0/1/2 (`0xAA` start byte, `0x2814`), and the full

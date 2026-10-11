@@ -109,21 +109,38 @@ known phrases and finding each exactly once in the image:
 |---|---|
 | `0x00` | string terminator |
 | `0x01` | space |
-| `0x0A` | line break within a message |
+| `0x04`–`0x0B` | `'` `(` `)` `+` `,` `-` `.` `/` (ASCII order, `*` skipped) |
+| `0x0C`–`0x15` | `0`–`9` (from `Dell S718QL`, `HDMI 1 (2.0)`, `16:9`) |
 | `0x16` | `:` |
-| `0x1A`–`0x33` | `A`–`Z` (ASCII − 39) |
-| `0x34`–`0x4D` | `a`–`z` (ASCII − 45) |
-| `0x5B`, `0x5D`, `0x6B`, … | accented letters (`é`, `ó`, `ä`, …) |
-| not yet mapped | digits, remaining punctuation, CJK and other scripts (multi-byte sequences with `0xFF` appear in those sections) |
+| `0x17`, `0x18`, `0x19` | probably `>`, `?`, `@` |
+| `0x1A`–`0x33` | `A`–`Z` |
+| `0x34`–`0x4D` | `a`–`z` |
+| `0x4E`–`0x6D` | accented and typographic characters: `ç ñ … ¿ á é í ó ú « » É à â è ê ’ Ä ß ä ö ü` (individual codes in `tools/mst9u_strings.py`) |
+| not yet mapped | `0x02`, `0x03`, a few more accents, and all CJK / other scripts (multi-byte sequences with `0xFF`) |
+
+`tools/mst9u_strings.py` dumps everything: `menu_strings.tsv` (4,872
+null-separated entries in `0x164000`–`0x170000`; 1,537 decode fully as Latin
+text, the rest are other scripts or non-text records) and `ascii_strings.tsv`
+(6,223 plain strings). Unknown glyph codes are written as `<xx>`.
+
+The menu block is laid out language by language: the English top-level menu
+starts at `0x164B60` (`Input Source`, `Brightness/Contrast`, … `Power
+Settings`, `Keystone Settings`, `Bluetooth Settings`, `Information`), followed
+by the same list in Spanish, French, German and then non-Latin languages.
+
+The **Power Settings** submenu (English at `0x1675FC`) is: `Auto Shutdown`,
+`Network` (`Standby On` / `Standby Off`), `Power Mode` (`Normal` / `Eco`),
+`Power On Beep` (`On` / `Off`). These line up with the NXP MCU's EEPROM
+settings (see nxp-mcu.md): which item maps to which byte is inferred, not
+traced.
 
 Located with this map: `Press Power Button to Turn Off Projector` at
 `0x16C610`, `…please DO NOT unplg the power cord` at `0x16C651` (**the `unplg`
 typo, feature b**, word at `0x16C65F`), `White Screen` at `0x16C6A7`,
 `Language` at `0x164BB6`. Strings are null-terminated and packed back to back,
-language after language (English, then Spanish, …), so `unplg` → `unplug`
-still needs one extra byte: there is no slack after the word. Short records
-that look like an index (`.. FC 55`, `.. FD 55`) sit just before the message
-block; whether strings are found by pointer or by counting terminators is not
+so `unplg` → `unplug` still needs one extra byte: there is no slack after the
+word. Short non-text records (e.g. `D6 AC 55 00 7D 00`, which read like a
+24-bit value plus a small number) sit between string groups; whether strings are found by pointer or by counting terminators is not
 yet known and decides how a length change must be done.
 
 The "+71 block" in earlier notes is not confirmed: the one block that scores
