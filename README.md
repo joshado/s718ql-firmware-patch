@@ -75,12 +75,14 @@ decompiled/      hand-decompiled C for reading (not buildable, not verified)
 
 ## Current state (high level)
 
-- **Scaler (`MERGE.bin`)** — layout fully mapped; both integrity checks
-  (a CRC-16 over the program, a CRC-32 over the whole file) are reproduced in
-  code. The main program decompresses from a raw DEFLATE stream. CPU is the
-  tricky part: MStar's proprietary 32-bit RISC core ("risc32"/Aeon, confirmed),
-  with no stock disassembler. Code region split out and its module structure
-  mapped (see docs/firmware-components.md).
+- **Scaler (`MERGE.bin`)** — layout fully mapped; **all three integrity checks
+  reproduced**, including the former unknown header field (`0x1b41bbca` = a
+  CRC-32 over the AP flash region). The AP is standard raw DEFLATE. The CPU is
+  MStar's AEON 32-bit RISC ("risc32", confirmed); we now have a working
+  **disassembler, decompiler and assembler** for it (`tools/aeon-ghidra/`), so
+  data edits, in-place code patches and repack/re-sign are all specified. No C
+  compiler exists for AEON (new logic = hand-written assembly). Not yet flashed;
+  scaler flashing needs an SPI-programmer recovery path first.
 - **Network module (`ACTUPGRADE.bin`)** — container is a flat record table with
   a 32-bit additive checksum we reproduce exactly. Linux/MIPS, EZCast Pro stack.
   Filesystems extract cleanly.

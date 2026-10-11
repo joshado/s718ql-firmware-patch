@@ -13,43 +13,61 @@ an external SPI programmer to recover.
 
 ---
 
-## 1. Scaler — `MERGE.bin` — repacker DESIGNED, not yet written
+## 1. Scaler — `MERGE.bin` — repacker FULLY SPECIFIED (all gates solved)
 
-We can fully parse and checksum-verify it (`tools/mst9u_merge.py`). To rebuild:
+We can parse and checksum-verify it (`tools/mst9u_merge.py`), and every piece
+needed to rebuild is now understood (verified in-session; repacker still to be
+written and flash-tested).
+
+To rebuild:
 
 1. Modify the decompressed AP (`ap_decompressed.bin`) and/or tail resources.
-2. Re-DEFLATE the AP as a **raw** stream (`zlib, wbits=-15`). ⚠️ The size must
-   fit the flash budget; MStar's original compressor isn't zlib, so the stream
-   bytes won't match even for identical input — that's fine as long as the
-   on-device loader just inflates it, **but** it changes `ap_flash_end` and both
-   trailing CRCs, so those must be recomputed.
-3. Rewrite the header u32s (`ap_flash_end`, and the unknown `0x1b41bbca` field).
-4. Append u32 decompressed-size + recompute **CRC-16/CCITT-FALSE** over
+2. Re-DEFLATE the AP as a **raw** stream (`zlib.compressobj(9, DEFLATED, -15)`).
+   The on-device loader (`sboot`) inflates **standard raw DEFLATE** — confirmed:
+   Python `zlib.decompressobj(-15)` inflates the shipped stream to our exact
+   `ap_decompressed.bin`. Re-deflating the unmodified AP at level 9 is `0x86c33`
+   vs the original `0x86473` (**+1,984 bytes**), so the size delta from an edit
+   is small; mind the total flash budget.
+3. Rewrite the header u32s at `0x10000`: `ap_flash_end` and the CRC-32 field
+   (below), plus the `filesize-4` field.
+4. Append u32 decompressed-size, then the **CRC-16/CCITT-FALSE** over
    `[0x20080 .. stream_end)`.
-5. Recompute the final **CRC-32** (MSB-first, poly 0x04C11DB7, init 0, BE) over
+5. Recompute **header[5]** = CRC-32 (MSB-first, poly `0x04C11DB7`, init 0, no
+   final XOR) over the **AP flash region** `[0x20080 .. ap_flash_end)`.
+6. Recompute the **trailer** CRC-32 (same algorithm, stored big-endian) over
    everything but the last 4 bytes.
 
-**Blocking unknown:** header field `0x1b41bbca`. It isn't the CRC-16 or the
-CRC-32. Hypothesis: a sum/CRC over the AP RAM image or the decompressed AP.
-*Next step:* brute-force common checksums of `ap_decompressed.bin` and of the
-compressed region against `0x1b41bbca` before trusting any repack. If it's an
-unverified-by-the-loader field we can ignore it, but we must prove the loader
-ignores it (via sboot disassembly) first.
+**The former "blocking unknown" `0x1b41bbca` is SOLVED.** It is the CRC-32
+(MSB-first, poly `0x04C11DB7`, init 0, no XOR) over `[0x20080 .. 0xa9cf9)` — the
+same CRC family as the trailer, over the AP flash payload (prefix + deflate
+stream + size + CRC-16). Reproduced exactly. So there are **no remaining
+unknowns** in the container; a repacker can round-trip and re-sign correctly.
 
-**For the easiest wins (features a/b — strings only):** if the edit is
-length-preserving we can patch `ap_decompressed.bin` in place, re-DEFLATE, and
-only the two CRCs + `ap_flash_end` change. That path avoids needing to fully
-understand `0x1b41bbca` *if* it turns out the loader skips it — otherwise we
-solve it first. A length-changing edit (like `unplg`→`unplug`) additionally
-needs either slack bytes after the word or a rebuilt string table.
+**For string/table edits (features a/b):** length-preserving edits are a clean
+data patch (edit `ap_decompressed.bin`, re-DEFLATE, fix the three checksums +
+`ap_flash_end`). A length-changing edit (`unplg`→`unplug`) needs slack or a
+rebuilt string/index table; the OSD text is a packed glyph-index blob (see
+firmware-components.md).
 
-**CPU note:** none of the above requires disassembling the MStar AP core. If we
-do need it (logic changes), the AEON R2 Ghidra module `eb4x/ghidra-plugin-aeon`
-covers this core (tested on MST9U firmware); load as `AEON:LE:32:R2` at base
-`0x180000`. See firmware-components.md, "Tooling for this core". Originally:
-none of the above requires disassembling the MStar AP core —
-string/table edits are data edits. Logic changes (CEC behaviour, power) *do*
-need the ISA, which is the hard, unsolved part.
+**Code edits are now mechanically possible too.** We have a working
+disassembler **and assembler** for the AEON core (`tools/aeon-ghidra/`): Ghidra's
+SLEIGH assembler round-trips AEON byte-for-byte (`b.movi r3,0x0`->`9860`,
+`b.ori r7,r0,0x70`->`50e070`, `b.addi r1,r1,-0x8`->`9c38`). So in-place
+instruction patches (flip a branch, change an immediate, redirect a call) can be
+assembled exactly. **Caveat:** there is no public C **compiler** for AEON, so
+"compile new C and inject it" is not available — new logic must be hand-written
+AEON assembly (fine for small hooks, impractical for large features). Free space
+for a hook exists past the image (BSS) or in padding, but a hook that grows the
+image still goes through the re-DEFLATE + re-checksum path above.
+
+**Not yet proven on hardware.** The repacker is specified but unwritten; nothing
+has been flashed. Flashing risk is the highest of all components: the USB
+updater lives *inside* the image being replaced, so a bad flash likely bricks
+the scaler until reflashed with an **external SPI programmer**. Establish that
+SPI recovery path (identify the flash chip, wire up a CH341A/flashrom) **before**
+the first scaler flash. Also still worth confirming by `sboot` disassembly (now
+possible — sboot is AEON) whether the loader actually checks each field, so we
+know which are mandatory.
 
 ---
 

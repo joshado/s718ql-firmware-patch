@@ -199,7 +199,8 @@ recoverable.
 
 1. Write `tools/mst9u_strcipher.py` (encode/decode the additive-shift OSD text)
    and a string-table locator → unblocks (a) and (b).
-2. Solve the scaler header field `0x1b41bbca` → unblocks any scaler repack.
+2. ~~Solve the scaler header field `0x1b41bbca`~~ **DONE** — it is CRC-32-MSB
+   over `[0x20080..0xa9cf9)` (see rebuilding.md). Scaler repack is unblocked.
 3. Write `tools/act_repack.py` and prove a byte-identical round-trip → unblocks
    (c) and (d) on the AM8250.
 4. Load the NXP and Nuvoton images into Ghidra (both are stock Cortex-M) → start
