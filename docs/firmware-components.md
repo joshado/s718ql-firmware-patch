@@ -132,15 +132,21 @@ MStar cmds(...)vcp(...)mccs_ver(2.1)`) and a panel id `MST9U3_PanelCMIM236HGJ_L2
   Reko projects, Ghidra runners and patch builders (unverified by us).
 - Architecture notes: `linux-chenxing.org` (MStar/SigmaStar community).
 
-The core is **big-endian for instructions, little-endian for data**; our
-header fields are LE, so the **`AEON:LE:32:R2`** language is the match.
+AEON instructions are **big-endian**; the plugin ships only `AEON:BE:32:R2`,
+which decodes the code correctly. (The core itself is OpenRISC-derived and
+big-endian; the little-endian words in `MERGE.bin` are the container header,
+not the AP.)
 Instructions are 2/3/4 bytes (length from the top bits of byte 0), byte
 aligned, 32 GPRs with r0 = 0, no delay slots, one condition flag. The
 `movhi`+`ori`-style address building is exactly the "immediate pairs, few
 absolute pointers" pattern seen above.
 
-**To load it in Ghidra:** import `ap_decompressed.bin` (or `ap_code.bin`) as
-raw AEON:LE:32:R2 at base **`0x180000`** (the header's `ap_ram_start`). The
+**Tooling is set up.** `tools/aeon-ghidra/` runs this plugin in headless Ghidra
+via Docker (`build.sh` then `run.sh <binary>`); no host JDK/Ghidra needed. A
+verified run over `ap_decompressed.bin` gave **64,525 instructions / 956
+functions** of clean AEON code. Note the shipped plugin only has the
+**`AEON:BE:32:R2`** language (instructions are big-endian anyway); load at base
+**`0x180000`** (the header's `ap_ram_start`). The
 first `0x89C79` is code+data; the reset/exception vectors are at the start of
 the AP prefix (`0x180100`). The DSP/SIMD pseudo-ops and the unresolved mapping
 of the later tables (below) are the known gaps.

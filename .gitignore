@@ -3,3 +3,7 @@
 firmware/
 .DS_Store
 **/.DS_Store
+
+# Ghidra-generated listings and build caches
+**/*.aeon.asm
+tools/aeon-ghidra/*.zip
