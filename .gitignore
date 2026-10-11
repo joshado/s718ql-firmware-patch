@@ -1,0 +1,5 @@
+# Untrusted vendor blobs and everything derived from them — do not commit.
+# Re-create from the Dell download (see README.md) + the tools/ scripts.
+firmware/
+.DS_Store
+**/.DS_Store
