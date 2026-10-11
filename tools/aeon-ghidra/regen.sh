@@ -36,8 +36,7 @@ docker run --rm --platform linux/amd64 \
   -processor AEON:BE:32:R2 \
   -loader BinaryLoader -loader-baseAddr "$base" \
   -scriptPath /opt/scripts \
-  -postScript DisassembleCodeRegion.java "$dstart" "$dend" \
-  -postScript AeonResolvePointers.java \
+  -postScript AeonFlowDisasm.java "$dstart" "$dend" \
   -postScript AeonFoldRefs.java \
   -postScript DefineStrings.java \
   -postScript NameFromStrings.java "/out/scaler_symbols_auto.tsv" \
