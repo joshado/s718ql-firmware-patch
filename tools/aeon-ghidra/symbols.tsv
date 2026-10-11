@@ -49,3 +49,75 @@
 0x002cf6e4	data	g_nosig_bg_colors	[C] 8 packed-3-3-2 colours for the burn-in cycle: [0]black [1]blue [2]purple [3]red [4]green [5]blue [6]cyan [7]magenta
 0x001c64ed	func	scaler_reg_write24	[C] write 24-bit value (RGB) to reg,reg+1,reg+2
 0x001c6162	func	scaler_mmio_write_byte	[C] byte write to a scaler register (base g_scaler_mmio_base)
+
+# ============================================================
+# Symbol-naming pass 2026-10-11 (OSD/input/scaler-register subsystems).
+# Spot-checked: read-byte mirror enc, bus-lock refcount (546x), Switch Source.
+# ============================================================
+#
+# ======================================================================
+# 1. Scaler register-access primitive family (near 0x1c6162 / 0x1c64ed)
+#    Register addr encoding: phys byte offset = (reg&0xffffff)*2 - (reg&1),
+#    added to g_scaler_mmio_base; a set top bit selects a bank page.
+# ======================================================================
+0x001c60a6	func	scaler_read_byte_direct	[?] returns *(reg|0x80000000); direct high-bit (uncached) byte read, no base/bank translation
+0x001c60b2	func	scaler_mmio_read_byte_nobank	[I] byte read at enc(reg)+base WITHOUT the high-bit bank select; read counterpart of 0x1c60d7
+0x001c60d7	func	scaler_mmio_write_byte_nobank	[I] byte write at enc(reg)+base WITHOUT bank select; write counterpart of 0x1c60b2 (cf. scaler_mmio_write_byte 0x1c6162 which adds bank)
+0x001c60f9	func	scaler_mmio_read_byte	[C] read counterpart of scaler_mmio_write_byte: same enc + high-bit bank page write; used by every read/RMW below
+0x001c61c5	func	scaler_mmio_rmw_bit	[I] locked read-modify-write: SET masked bits if param2!=0 else CLEAR them; brackets access with g_scaler_bus_lock_count + HW lock reg base+0x203034
+0x001c629d	func	scaler_mmio_read_word	[C] 16-bit read: (reg+1)<<8 | reg via scaler_mmio_read_byte
+0x001c62ce	func	scaler_mmio_write_word	[C] 16-bit write: reg=lo byte, reg+1=hi byte via scaler_mmio_write_byte
+0x001c63ce	func	scaler_rmw_bit_windows	[?] for each window-bit set in param1 mask, locked-RMW a per-window register taken from g_window_ctx[win] (generic multi-window bit write)
+0x001c646f	func	scaler_reg_write_word_masked	[C] 16-bit masked RMW (reg,val,mask): scaler_reg_write(reg,..) + scaler_reg_write(reg+1,..)
+0x001c64a9	func	scaler_mmio_read_24	[C] 24-bit read reg,reg+1,reg+2 (read counterpart of scaler_reg_write24)
+0x001c6528	func	scaler_reg_write24_masked	[C] 24-bit masked RMW (reg,val,mask); low two bytes via scaler_reg_write, top byte locked-RMW inline
+0x00305198	data	g_scaler_bus_lock_count	[C] refcount guarding the scaler register bus; inc/dec around every locked RMW, paired with HW lock reg at g_scaler_mmio_base+0x203034 (appears in ~all RMW primitives)
+#
+# ======================================================================
+# 2. Scaler per-channel output enable / coefficient writers
+#    Channel register base 0x101d00 + ch*0x20 (ch0=0x101d00, ch1=0x101d20, ch2=0x101d40)
+# ======================================================================
+0x001c369a	func	scaler_ch_set_enable	[I] write bit0 of reg (0x101d00 + ch*0x20) = (val!=0); per-channel scaler output enable/mute. ch1=0x101d20 matches scaler_setup_17b6, ch2=0x101d40 matches scaler_setup_2d66
+0x001c36b4	func	scaler_ch_write_coord16	[?] 16-bit write to per-channel sub-reg (0x101d00/02/14/1a + ch*0x20) selected by param2; window/scaler coord or coef
+#
+# ======================================================================
+# 3. OSD / screen state machine + input handling (around osd_no_input_handler 0x1e73fe)
+# ======================================================================
+0x001e2e3d	func	osd_set_ch2_mute_for_mode	[I] calls scaler_ch_set_enable(2,x) (reg 0x101d40) chosen by g_osd_mode range: modes 0x11..0x5f except 'J' -> arg 0, else arg 1
+0x001e3156	func	osd_dispatch_event	[I] OSD state-transition step: takes an event code (0x24/0x36/0x3e seen); forces g_osd_mode='B' per g_osd_substate; returns 1 when screen inactive (g_osd_mode high bit set). Tail-twin of osd_no_input_handler
+0x001e7287	func	osd_process_event	[?] OSD/menu event filter: takes event/key code, branches on g_osd_mode and ctx flag byte (g_sys_ctx+0x44b), drives submenu index bRam00307bf2
+0x001e82ea	func	osd_draw_current_screen_text	[C] "Load prop font"; renders osd_master_table[g_osd_mode] entry for current language (g_sys_ctx+0x47b) via osd_render_glyph_string; modes>=0x70 use osd_master_table_hi
+0x001e81e1	func	osd_draw_text_resource	[I] low-level helper: pick the per-language entry (index g_sys_ctx+0x47b) from a string table arg and render it
+0x001f3d62	func	sys_ctx_init_defaults	[I] initialises the g_sys_ctx struct with factory defaults (0x80/0x80/0x80, 0xff.., 0x32.. look like picture-quality defaults)
+0x002d0a34	data	g_sys_ctx	[I] pointer to the main AP context/settings struct. OSD SM fields: +0x44b flags(bit0 power-on,0x8/0x20 used,0x80), +0x452 current source id, +0x45d current-port index, +0x45e per-port->scaler map array, +0x47b OSD language idx, +0xc7a current timing index (table stride 0xcc)
+0x002a9b40	data	osd_master_table_hi	[I] secondary screen-id -> per-language string table, used when g_osd_mode>=0x70 (companion to osd_master_table)
+#
+# ======================================================================
+# 4. Input / source detection, status monitor, timing & panel power
+# ======================================================================
+0x001afee9	func	sm_poll_input_scaler_window	[I] status-monitor pump: walks per-port/scaler/window state tables (g_scaler_state_tbl) and logs transitions ("[SMInput]/[SMScaler]/[SMWindow]", "FPLL_T Lock/No Lock"). (auto-named FPLL_T = just one substring)
+0x001c0963	func	timing_detect_change	[C] per-scaler valid-timing change detector: "Valid Timing : Sync Loss" + Vtotal/Hstart/HPeriod/polarity/VDE/HDE changed; returns 1 on any change
+0x001c0dc6	func	prepare_for_timing_change	[C] "PrepareForTimingChange SrcInputPort=%d"; resets timers, mutes scaler reg 0x406, dispatches OSD event 0x3e when g_osd_mode=='-'
+0x001c12f9	func	prepare_for_timing_change_port	[I] " PrepareForTimingChange:%d"; per-port entry invoked from sm_poll_input_scaler_window
+0x001c59a3	func	input_port_setup_vga_sog	[C] analog VGA/SOG input-port enable/disable path ("InputPort_____VGA" / "InputPort_____SOG"); (port, enable)
+0x001ffc4c	func	app_switch_source	[C] "@@@@@ Switch Source to %d"; writes new source id to g_sys_ctx+0x452
+0x001f17f4	func	appsystem_check_power_status	[C] "Zonic APPSystem_CheckPowerStatus"; DC/AC ON, DC OFF, DPMS?? ON; drives g_input_status bit 0x8 (standby/power) and g_sys_ctx+0x44b bit0 (power-on)
+0x001d3a6d	func	power_turn_off_panel	[C] "Power_TurnOffPanel"; backlight/panel-off sequence (uses timing table at g_sys_ctx + idx*0xcc)
+0x001d3b54	func	power_turn_on_panel	[C] "Power_TurnOnPanel"; panel power-on sequence
+0x001d108e	func	delay_ms	[I] busy/timer delay; called throughout power/source paths with ms-looking args (200,300,500,0x50)
+#
+# ---- status tables referenced by the state machine (data) ----
+0x002cfc70	data	g_scaler_state_tbl	[I] per-scaler/window state records, stride 0x4c. Fields: +0x4 timing byte, +0x6 mode word, +0x8 settle timer, +0x10 flags(0x1=active/dirty), +0x14 sync/timing status (0x3 polarity bits, 0xc sync-loss)
+0x0030502d	data	g_port_status_prev	[I] per-port previous-status shadow bytes (indexed 1..3), compared against live status in sm_poll_input_scaler_window to detect edges
+#
+# ---- no-signal screen renderer (feature a); two-layer: free-run blue + OSD overlay ----
+# Verified in-session: 0x1dbc84 draws the two GRAM blobs + text for mode 4;
+# 0x21c727 is the 2bpp/12-bit-code GRAM expander. No RGB CLUT exists (2bpp indexed,
+# index0=transparent, index3=white). Blue = free-run reg 0x90102f33 boot default.
+0x001dbc84	func	osd_nosig_draw	[C] mode-4 no-signal screen draw handler (dispatch tbl 0x2d9200 +0x14): streams osd_nosig_logo_bmp + icon via osd_gram_write_rle, text via osd_draw_current_screen_text
+0x0021c925	func	osd_gram_write_rle	[C] OSD-GRAM RLE writer: GRAM ptr via ports 0x101c66/67/68, streams 16-bit words (top nibble=repeat, low 12 bits=code); 2bpp indexed, 6 pixels/code
+0x0021c727	func	osd_gram_expand_2bpp	[C] expands two 1bpp bitplanes into GRAM 2 bits/pixel (OSD is 4-level indexed; ctrl reg 0x101c6d, GRAM port 0x101c68)
+0x001e82ea	func	osd_draw_current_screen_text	[C] "Load prop font": renders osd_master_table[g_osd_mode] for current language via osd_render_glyph_string
+0x002a6c92	data	osd_nosig_logo_bmp	[C] monochrome 2bpp OSD bitmap = the white Dell logo on the no-signal screen (GRAM index 0x20). NOT the JPEG
+0x002a74d8	data	osd_nosig_icon_bmp	[C] second 2bpp OSD graphic drawn by osd_nosig_draw at GRAM index 0xcf
+0x002d9200	data	osd_dispatch_table	[C] OSD per-mode handler table, stride 0x1c, indexed by g_osd_mode; +0x14=draw handler, +0x18=flags. mode4 entry @0x2d9270 -> 0x1dbc84

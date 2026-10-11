@@ -153,8 +153,10 @@ for "run our own streaming code" if we can get in.
 2. **Power pressed (or wake event).** NXP MCU runs the power-on sequence, brings
    up rails, and signals the Nuvoton formatter MCU
    (`@PowerOn event from M054!!`). Fans spin (fan states: Initial → Normal).
-3. **Scaler boots:** `sboot` loader → decompresses the AP into DRAM → AP starts,
-   initialises the panel/timing, OSD, and inputs.
+3. **Scaler boots:** the scaler's **8051** cores come up first (the PM core and
+   `sboot` — both 8051, not AEON); the AP's raw-DEFLATE image is inflated into
+   DRAM and the **AEON** AP ("R2") is released, initialising panel/timing, OSD,
+   and inputs. (Which core performs the inflate isn't yet pinned.)
 4. **Formatter brought up:** Nuvoton MCU + DLPC4422 initialise the DMD and laser
    ballast; colour sequences load. Scaler begins sending video.
 5. **Smart SoCs:** the AM8250 (network) and RTD1295 (actiontec) boot their own

@@ -34,11 +34,11 @@ Parsed and checksum-verified by `tools/mst9u_merge.py`. Layout:
 |---|---|---|
 | **PM / 8051 code** | `0x000000`–`0x010000` | standby power-management core |
 | **Header** | `0x010000` | 10×u32 LE (see below) |
-| **sboot (loader)** | `0x010000`–`0x020080` | contains the zlib/inflate used to unpack the AP; build stamp `Feb 02 2017 11:27:01` at 0x20060 |
+| **sboot** | `0x010000`–`0x020080` | a **second 8051 program** (Keil C51; reset `LJMP 0x1b48`; build `Feb 02 2017 11:27:01` at 0x20060). First `0x80` bytes = the AP load-descriptor header; the 8051 image is `[+0x80 : +0x10080]`. A resident PM/boot core that brings up the AEON AP; computes a CRC (`Check CRC Result_H/L`) and exposes a UART debug console with an RX command ring. **NOT AEON** (the long-standing "sboot is AEON" assumption was wrong — verified `02 1b 48`/8051 opcodes + the `51 -> R2` strings). Decompiled to `decompiled/sboot.c` |
 | **AP blob prefix** | `0x020080`–`0x023880` | **uncompressed** 0x3800 bytes: exception vectors, image info header at +0x1100 (see below), a resource table tagged `TEL` at +0x2000 |
-| **AP DEFLATE stream** | `0x023880`–`0x0a9cf3` | raw DEFLATE → **0x181560 bytes** of ARM-ish MStar AP code + strings |
+| **AP DEFLATE stream** | `0x023880`–`0x0a9cf3` | raw DEFLATE → **0x181560 bytes** of **AEON** (OpenRISC-derived, "R2") MStar AP code + strings. Which core inflates it (the 8051 in software, BDMA HW, or the AEON itself) is not yet pinned; the stream is standard raw DEFLATE either way (confirmed via `zlib -15`) |
 | **AP size + CRC** | `0x0a9cf3` | u32 LE decompressed size, then u16 **CRC-16/CCITT-FALSE** (LE) over `[0x20080 .. end-of-stream)` |
-| **tail resources** | `0x0a9cf9`–EOF | referenced by the TEL table; includes the Dell-logo JPEG at `0xb9d08` (TEL type 0xc5, 2-tone, extracted to `firmware/unpacked/scaler/images/`; used as a mask for the no-signal screen — see feature-targets.md (a)) |
+| **tail resources** | `0x0a9cf9`–EOF | referenced by the TEL table; includes the Dell-logo JPEG at `0xb9d08` (TEL type 0xc5, blue-on-white, extracted to `firmware/unpacked/scaler/images/`; it is the **boot/menu splash** (mode 7), **NOT** the no-signal logo — that is a separate monochrome 2bpp OSD bitmap; no colour inversion exists — see feature-targets.md (a)) |
 | **Trailer** | EOF-12 | `55 AA AB CD` magic; **CRC-32** (poly 0x04C11DB7, MSB-first, init 0, no final XOR) over everything before the last 4 bytes, stored **big-endian** |
 
 Header u32s at 0x10000 (LE): `ap_flash_start=0x20080`, `ap_ram_start=0x180000`,

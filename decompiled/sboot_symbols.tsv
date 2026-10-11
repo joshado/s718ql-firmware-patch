@@ -1,0 +1,49 @@
+# Curated symbol table for the MStar MST9U "sboot" image.
+# IMPORTANT: sboot is 8051 (Keil C51) code, NOT AEON. Addresses below are 8051
+# CODE-space addresses for the sliced image sboot.bin[0x80:] (64 KB), i.e.
+#   8051_addr = sboot.bin_file_offset - 0x80.
+# Processor: 8051:BE:16:default (Ghidra). Confidence: [C]confirmed [I]inferred [?]tentative.
+# Data rows live in 8051 XDATA/IRAM/SFR spaces and are documentation only
+# (Ghidra's default space is CODE, so these labels may not auto-place).
+#
+# ---- reset / C51 runtime ----
+0x1b48	func	c51_startup	[C] Keil ?C_STARTUP: SP=0x76, zero IRAM, clear XDATA BSS 0x5000-0x5fff, copy init table @0x1ca8, then banked-call main
+0x1bf8	func	c51_bankcall	[C] Keil ?B_CALL banked far-call trampoline: push return bank+addr, LJMP bank-dispatch 0x2000
+0x1c8e	func	putchar	[C] veneer: banked call to uart_putchar (0x94d3)
+0x16ff	func	printf_vfmt	[C] printf-style format parser (%d/%x/width); emits chars via putchar(0x1c8e)
+0x1117	func	dispatch_table_call	[I] indirect dispatch over 3-byte (key,funcptr) records; key matched against arg
+#
+# ---- interrupt vectors / ISRs ----
+0x0000	func	reset_vector	[C] LJMP c51_startup(0x1b48)
+0x2329	func	isr_ext0	[C] external interrupt 0 (vector 0x03)
+0x1a69	func	isr_timer0	[C] timer0 interrupt (vector 0x0b); PM/poll tick
+0x207b	func	isr_ext1	[C] external interrupt 1 (vector 0x13)
+0x253b	func	isr_timer1	[C] timer1 interrupt (vector 0x1b)
+0x2275	func	isr_serial	[C] UART ISR (vector 0x23): RX byte -> ring buf xdata 0x5004 (widx xdata 0x5038, cap 0x32); TX-done sets iram bit 0x04
+#
+# ---- UART debug console ----
+0x92ca	func	uart_init	[C] SCON=0x50 (mode1,REN), PCON|=0x80 (SMOD), MStar baud SFR 0xBA=3 / 0xAA=0xD9, clear TI/RI, enable ES(0xAC)
+0x94d3	func	uart_putchar	[C] write SBUF (SFR 0x99); wait TX-done (iram bit 0x04 from ISR, else poll TI). Banked (bank0)
+#
+# ---- code banking ----
+0x2000	func	set_code_bank0	[C] write #0 to bank-select reg xdata 0x1019; mirror iram 0x13
+0x2010	func	set_code_bank1	[C] write #1 to bank-select reg 0x1019
+0x2020	func	set_code_bank2	[C] write #2 to bank-select reg 0x1019
+0x2030	func	set_code_bank3	[C] write #3 to bank-select reg 0x1019
+0x2040	func	set_code_bank4	[C] write #4 to bank-select reg 0x1019
+0x2050	func	set_code_bank5	[C] write #5 to bank-select reg 0x1019
+0x2060	func	set_code_bank6	[C] write #6 to bank-select reg 0x1019
+0x2070	func	set_code_bank7	[C] write #7 to bank-select reg 0x1019
+#
+# ---- main ----
+0x8d6e	func	main	[C] banked. init (0x8763,0x960a); print banner (arg xdata 0x503e); poll loop @0x8d90 -> 0x59c3 / poll 0x95e5 / 0x7c1b / 0x9568 / 0x9283
+0x8763	func	main_init1	[?] first init call from main
+0x960a	func	main_init2	[?] second init call from main
+#
+# ---- data / registers (8051 XDATA/IRAM/SFR; documentation) ----
+0x1019	data	REG_code_bank_select	[C] XDATA/RIU: 8051 code-bank select (window 0x8000-0xffff); iram 0x13 mirrors it
+0x5004	data	g_uart_rx_ring	[C] XDATA UART receive ring buffer (filled by isr_serial, 0x32 bytes)
+0x5038	data	g_uart_rx_widx	[C] XDATA UART receive write index
+0x503e	data	g_banner_val	[I] XDATA value printed in main's startup banner
+0x1012	data	REG_boot_1012	[I] XDATA/RIU boot/clock ctrl written =0xff at startup
+0x1018	data	REG_boot_1018	[I] XDATA/RIU boot/clock ctrl |=0x80 at startup

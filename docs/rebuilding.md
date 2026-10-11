@@ -23,7 +23,7 @@ To rebuild:
 
 1. Modify the decompressed AP (`ap_decompressed.bin`) and/or tail resources.
 2. Re-DEFLATE the AP as a **raw** stream (`zlib.compressobj(9, DEFLATED, -15)`).
-   The on-device loader (`sboot`) inflates **standard raw DEFLATE** — confirmed:
+   The on-device boot path inflates **standard raw DEFLATE** — confirmed:
    Python `zlib.decompressobj(-15)` inflates the shipped stream to our exact
    `ap_decompressed.bin`. Re-deflating the unmodified AP at level 9 is `0x86c33`
    vs the original `0x86473` (**+1,984 bytes**), so the size delta from an edit
@@ -65,9 +65,21 @@ has been flashed. Flashing risk is the highest of all components: the USB
 updater lives *inside* the image being replaced, so a bad flash likely bricks
 the scaler until reflashed with an **external SPI programmer**. Establish that
 SPI recovery path (identify the flash chip, wire up a CH341A/flashrom) **before**
-the first scaler flash. Also still worth confirming by `sboot` disassembly (now
-possible — sboot is AEON) whether the loader actually checks each field, so we
-know which are mandatory.
+the first scaler flash.
+
+**Recovery nuance (from the sboot RE, `decompiled/sboot.c`):** `sboot` and the PM
+core are **8051** programs (Keil C51), *separate CPUs from the AEON AP*. They boot
+first, own the SPI-NOR driver, and expose a **UART debug console with an RX
+command ring** — so a corrupt AP flash should **not** brick the 8051 side, which
+keeps running and talking. That makes the 8051 UART console the realistic
+"recover without an SPI programmer" lever — **if** its monitor can drive a
+flash erase/write (present as SPI opcodes incl. `0xd8` 64K-erase, but not proven
+reachable from the console; needs hardware). sboot being 8051 also means a
+safety-net patch to it uses a standard, available 8051 toolchain (no AEON-compiler
+blocker) — but it is the always-on core, so a bad sboot flash is higher-stakes
+than a bad AP. Still **UNCERTAIN**: whether the sboot CRC (`Check CRC Result_H/L`)
+actually *gates* the AEON release and what it does on mismatch — needs banked-code
+tracing or a serial console.
 
 ---
 

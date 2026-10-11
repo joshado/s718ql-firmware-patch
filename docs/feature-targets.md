@@ -107,49 +107,68 @@ location cannot reach it.
   address** and its per-language table isn't statically locatable (computed at
   runtime from base+language+screen-id).
 
-**NO-SIGNAL BACKGROUND MECHANISM NAILED DOWN.** The free-run/no-signal
-background is the scaler **frame-colour register `0x90102f33`** (24-bit RGB,
-written via `scaler_reg_write24` LSB→reg, or packed-3-3-2 via
-`osd_set_bg_color_332` `0x1be86b`). The two screens the user sees map cleanly:
+**NO-SIGNAL SCREEN FULLY RESOLVED — it is a TWO-LAYER COMPOSITE** (confirmed by
+four independent agents + spot-checks; the "Where it's blocked" indirect-dispatch
+wall noted above is now cleared — the mode-4 renderer is `osd_nosig_draw`
+`0x1dbc84`, reached via the OSD dispatch table `0x2d9200`, stride `0x1c`, slot
+`+0x14`).
+There is **no colour inversion** anywhere; the premise that the stored Dell JPEG
+is recoloured was a red herring. The screen is built from two separate hardware
+layers:
 
-- **"Searching" screen = WHITE.** Mode `g_osd_mode==0x0e` ("ShowDiag") calls
-  `osd_set_frame_color` (`0x1ff83c`), which hard-writes `0xffffff`. The RGB
-  setter `osd_set_frame_color_rgb` (`0x1c70ec`) is only ever called
-  `(0xff,0xff,0xff)`.
-- **Stable "no signal" screen = BLUE = the register's power-on/init DEFAULT.**
-  The plain no-signal state (`g_osd_mode==0x04`, reached in `osd_no_input_handler`
-  `0x1e73fe` via the branch that sets the mode with **no colour write**) never
-  touches `0x90102f33`, so the panel shows whatever the register was last set to
-  — its boot default, which is blue.
+- **Layer 1 — the BLUE background:** the scaler's **free-run frame generator**,
+  register **`0x90102f33`** (RGB888: `f33`=R, `f34`=G, `f35`=B; a 24-bit write via
+  `scaler_reg_write24` puts `V = R | G<<8 | B<<16`). This is NOT part of the OSD.
+- **Layer 2 — the WHITE Dell logo + "No signal"/"Press Source" text:** the mode-4
+  **OSD overlay** (`g_osd_mode==0x04`), drawn by `osd_nosig_draw` (`0x1dbc84`):
+  it streams two **2-bits-per-pixel indexed** OSD-GRAM bitmaps via
+  `osd_gram_write_rle` (`0x21c925`, GRAM ports `0x101c66/67/68`, 12-bit RLE codes
+  = six 2-bit pixels each; expander `0x21c727`) and the text via
+  `osd_draw_current_screen_text` (`0x1e82ea`). **Index 0 = transparent** (the blue
+  Layer 1 shows through); **index 3 = foreground = white.** There is **no RGB
+  CLUT/palette** — the 4 index levels map to colour by a fixed OSD default, not a
+  per-screen table (the CLUT hypothesis was tested and disproven).
 
-**Key fact that pins this down:** across the entire AP decompile the *only*
-literal ever written to `0x90102f33` is `0xffffff` (white, 3 sites). Every other
-write is a save/restore of the existing value, the audio-mute grayscale ramp, or
-the burn-in **colour-cycle** (`osd_nosignal_color_cycle` `0x1e76f7`, a *separate*
-mode `0x0d`, gated on `g_input_status&0x40`). No code writes blue — so blue is
-the default, set at init outside the AP (hardware reset default, or sboot/8051),
-not by any AP literal. (An earlier note here claimed the cycle table
-`g_nosig_bg_colors` `0x2cf6e4` produces the blue; that is the burn-in/demo path,
-not the stable screen — corrected.)
+So the **Dell logo on the no-signal screen is a monochrome OSD bitmap**
+(`osd_nosig_logo_bmp` = `DAT_ram_002a6c92`, file off `0x126c92`; a second icon
+`DAT_ram_002a74d8` at GRAM index `0xcf`), **NOT** the JPEG. The blue-on-white
+JPEG (`images/jpeg_0b9d08.jpg`, B_ID `0xc500`) is a *separate* asset for the
+**boot/menu splash** (mode 7, `FUN_ram_002027b0` → shown unmodified on a white
+free-run background). The two assets simply have opposite colour schemes — that
+is the whole of the "inversion."
 
-**To change the blue — two options:**
-1. **Code patch (robust, recommended).** In `osd_no_input_handler` (`0x1e73fe`),
-   on the no-signal mode-4 path, add one write of the desired colour:
-   `scaler_reg_write24(0x90102f33, R | G<<8 | B<<16)` or
-   `osd_set_bg_color_332(0, <packed-3-3-2>)` (`0x03`=blue, `0xe0`=red,
-   `0x1c`=green, `0x00`=black, `0xff`=white). This forces the colour regardless
-   of the boot default. Needs AEON code injection (toolchain ready) + repack
-   (all container CRCs solved).
-2. **Find/patch the init default.** Locate the boot-time write of the free-run
-   colour (likely sboot `sboot.bin` or the 8051 `pm_8051.bin`, or a register-init
-   table) and change it there. Cleaner (no AP code change) but requires finding
-   the init site in those images.
+**Where the blue comes from = the power-on/boot DEFAULT of `0x90102f33`.** Across
+the entire AP, every literal written to that register is `0xffffff` (white, the
+"searching"/ShowDiag path `osd_set_frame_color` `0x1ff83c`) or the burn-in cycle
+table (`g_nosig_bg_colors` `0x2cf6e4`, mode `0x0d` only); **no code ever writes
+blue.** The normal video→no-signal path (`osd_no_input_handler` `0x1e73fe` line
+~76487) sets mode 4 with **no colour write**, leaving the register at its boot
+default (≈ `0x00/0x00/0xFF`). The register address is built at runtime
+(`movhi 0x9010`/`ori 0x2f33`) and never appears as a word literal, so there is no
+(addr,value) init table for it in the AP — the default is set **outside** this
+image (HW reset default, or `sboot.bin`/`pm_8051.bin` init). *(The former claim
+"mode-4 never touches the register" was imprecise: one menu→no-signal branch,
+line 76483, does write WHITE `osd_set_bg_color_332(0,0xff)` — but only when
+signal is lost with a menu open, not the normal case.)*
 
-*Not yet pinned:* the exact init site that sets the blue default (option 2).
-Searching the AP for the register literal is futile — `0x90102f33` is built at
-runtime with `movhi 0x9010`/`ori 0x2f33`, never stored as a word. Confirming the
-default empirically (serial debug console reads `0x90102f33` live at no-signal)
-is the fastest way to verify before/after a patch.
+**To change the blue — three options, best first:**
+1. **Code patch (robust, universal — recommended).** Inject one colour write at
+   the top of `osd_nosig_draw` (`0x1dbc84`, file off `0x5dc84`), which runs on
+   every no-signal draw: `scaler_reg_write24(0x90102f33, R | G<<8 | B<<16)` (e.g.
+   red = `0x0000FF`, green = `0x00FF00`, original blue = `0xFF0000`) or
+   `osd_set_bg_color_332(0, <packed-3-3-2>)` (`0xe0`=red, `0x1c`=green, `0x03`=blue,
+   `0x00`=black, `0xff`=white). Needs AEON code injection + repack (both solved).
+2. **Limited data edit (menu path only).** Change the `0xff` immediate in
+   `osd_set_bg_color_332(0,0xff)` at line 76483 to a packed-3-3-2 value — a pure
+   data edit, but only affects the "signal lost with menu open" case, so it is not
+   a complete fix on its own.
+3. **Patch the boot default (cleanest if found, not located).** The write that
+   makes the default blue is outside the AP — candidates: `sboot.bin`,
+   `pm_8051.bin`, or a HW reg-init list. Not yet found.
+
+*Verify empirically:* read `0x90102f33` over the serial/debug console at no-signal
+before and after any patch — this confirms the register is the surface (vs. a
+panel-side default) and catches the case where line 76483 already forced white.
 
 ## (c) Root on the two Linux systems — genuinely easy
 
