@@ -236,19 +236,18 @@ through a **per-language indexed engine** (confirmed in code):
   `0x1e49e1`, `0x1e4b75`, and a cluster `0x1e9a69`-`0x1e9dd1` that looks like the
   source/no-signal message set (5 nearby calls).
 
-**Full render path (decompiled).** `FUN_ram_001e4aea` is the generic screen
-renderer:
-```
-table    = *(master_table + screen_id*4)      # screen_id = DAT_ram_00307b98
-entry    = table + language*8                  # language = state_struct[+0x47b]
-render(0x219504, entry.ptr, *(u16*)entry.len)  # or 0x219f10 for a variant
-```
-So each OSD screen is `(ptr, len)` per language; a **master pointer table**
-maps a **screen-id** (`DAT_ram_00307b98`, written in 176 places — it is the
-current-message global) to that screen's per-language table; language then
-selects the string. The `(ptr, len)` entries chain (`ptr[i]+len[i] == ptr[i+1]`).
-Sibling renderers `0x1e4a5e`/`0x1e4aa4` hardcode a specific table
-(`0x2e95b4` etc.).
+**Render path — PARTLY UNDERSTOOD, earlier model was wrong.** `0x219504` is a
+real glyph renderer `(win, str_ptr, len, ...)`. But `FUN_ram_001e4aea`, earlier
+read as the generic `master_table[screen_id][language]` renderer, computes its
+"master table" base as `0x2a9974` — which is a **string region with no pointers
+at all** (verified: no in-image pointer anywhere in `0x2a9974..0x2aa400`). So
+that function reads garbage as a pointer table and is almost certainly **dead or
+debug code** (it sits among "fake capture window" debug strings). The
+`master_table[screen_id]` model built on it is **unsound** — do not rely on it.
+What is real: `g_osd_mode` (`0x307b98`) is an OSD state byte (176 writers); the
+`(ptr,len)` chains in the menu region exist but their entries point mid-message
+and do not cleanly decode as per-screen/per-language tables; and no clean
+function->screen->text linkage has been established.
 
 The **master screen table** base is resolved: `osd_render_screen` does
 `movhi 0x2b; addi -0x668c` -> **`0x2a9974`**, then `*(0x2a9974 + screen_id*4)`

@@ -8,10 +8,10 @@
 # ---- OSD string / i18n engine (see docs/firmware-components.md) ----
 0x00219504	func	osd_render_glyph_string	[C] glyph renderer: (win,str_ptr,len,...) -> draws OSD text
 0x00219f10	func	osd_render_glyph_string_v2	[?] sibling renderer used by one screen path
-0x001e4aea	func	osd_render_screen	[C] master_tbl[screen_id][language] -> (ptr,len) -> render; screen_id=g_osd_screen_id
-0x001e49e1	func	osd_render_screen_tbl_2e8998	[C] renders the per-language table at 0x2e8998
-0x001e4a5e	func	osd_render_screen_tbl_2e95b4	[C] table[language*8] at 0x2e95b4 -> render
-0x001e4aa4	func	osd_render_screen_3	[I] same shape, own table
+0x001e4aea	func	fn_1e4aea_dead	[?] reads 0x2a9974 (a STRING region) as a pointer table -> likely DEAD/debug code, not the real renderer; earlier "master table" model was unsound
+0x001e49e1	func	fn_1e49e1	[?] touches osd_strtbl_a; role unclear
+0x001e4a5e	func	fn_1e4a5e	[?] indexes osd_strtbl_b by language*8; role unclear
+0x001e4aa4	func	fn_1e4aa4	[?] indexes osd_strtbl_a by language*8; role unclear
 0x001e9d6d	func	osd_show_ascii_as_id	[C] copies an ASCII string via ascii_to_glyph, renders with a msg id
 0x001e9942	func	ascii_to_glyph	[I] per-char ASCII -> OSD glyph-index transform
 0x001e9f2d	func	osd_msg_by_source	[C] picks a per-source label (g_src_type 0x01/02/03/05), shows id 0xde
@@ -21,16 +21,16 @@
 0x001c59a3	func	dbg_printf	[I] logger: (fmt_str, value)
 #
 # ---- OSD state / tables ----
-0x00307b98	data	g_osd_screen_id	[C] current OSD screen/message id (176 writers); indexes the master table
+0x00307b98	data	g_osd_mode	[C] OSD state/mode byte (176 writers; read as ==0x11/0x19 by msg wrappers). NOT confirmed as a "screen id" into a master table (that model was unsound)
 0x002d0a34	data	p_scaler_state	[C] pointer to the scaler/window state struct (+0x47b=language, +0x45d=window idx)
 0x0030f6d8	data	g_window_info	[I] per-window info array, stride 0x84; [0]=current input/source type
 0x00304d14	data	g_osd_string_base	[C] set to 0x2da620 before rendering
 0x002da620	data	osd_string_region	[C] OSD string-region base
 0x0030574c	data	g_osd_small_font	[?] engine picks 0x12/0x18 glyph height from this
-0x002e8998	data	osd_tbl_scr_a	[C] per-language (ptr,len) table for one screen
-0x002e95b4	data	osd_tbl_scr_b	[C] per-language (ptr,len) table (used by osd_render_screen_tbl_2e95b4)
-0x002e9654	data	osd_tbl_nosignal_1	[C] no-signal per-language (ptr,len) table (strings 0x2ec6e0..0x2ece52)
-0x002e99b0	data	osd_tbl_nosignal_2	[C] no-signal per-language (ptr,len) table (Es/Fr/De "No signal..Press Source")
+0x002e8998	data	osd_strtbl_a	[?] (ptr,len) chain, entries point mid-message; exact structure unclear (not clean per-language screens)
+0x002e95b4	data	osd_strtbl_b	[?] referenced by 0x1e4a5e; not a clean (ptr,len) table
+0x002e9654	data	osd_strtbl_nosig1	[?] (ptr,len) chain near the no-signal strings; linkage to a renderer NOT established
+0x002e99b0	data	osd_strtbl_nosig2	[?] (ptr,len) chain over Es/Fr/De no-signal strings; renderer linkage NOT established
 #
 # ---- strings of interest (code refs not all found) ----
 0x002aacf9	data	str_enable_frame_color	[C] "[msScalerAP] Enable Frame Color" (referencing code NOT located)
