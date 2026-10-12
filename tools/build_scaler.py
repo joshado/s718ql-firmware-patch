@@ -15,7 +15,7 @@ Each data_patch line: `RAM_addr expect_hex replace_hex` (RAM = 0x183800 + dec
 offset for AP-stream bytes). expect_hex guards against drift; same length as
 replace_hex keeps the edit size-neutral (e.g. feature b, the unplg typo reword).
 """
-import sys, hashlib, importlib.util
+import sys, hashlib, subprocess, importlib.util
 from pathlib import Path
 
 mm_spec = importlib.util.spec_from_file_location("mm", str(Path(__file__).with_name("mst9u_merge.py")))
@@ -24,6 +24,36 @@ mm = importlib.util.module_from_spec(mm_spec); mm_spec.loader.exec_module(mm)
 BASE, DEC = 0x180000, 0x183800
 HOOK_RAM = 0x1dbc84
 HOOK_ORIG = bytes.fromhex("9c380d21040d4100")   # the 3 displaced prologue instrs (8 B)
+
+# ---- auto version stamp: write the git short-hash into a visible OSD string ----
+# The HDMI1 no-signal line "No HDMI 1 (2.0) signal / Press "Source" to switch
+# input" lives (glyph-encoded) in the AP. We overwrite the 12 glyphs "switch
+# input" (@0x2f05be) with "v<7-hex-hash>" (1 + 7 + 4 spaces = 12), size-neutral,
+# so the screen we test on shows exactly which commit produced the flashed image.
+# OSD glyph encoding: ' '=0x01, 0-9=0x0c..0x15, a-z=0x34..0x4d (so hex a-f=0x34..0x39).
+STAMP_ADDR = 0x2f05be
+STAMP_EXPECT = bytes.fromhex("464a3c47363b013c41434847")  # s w i t c h _ i n p u t  (12 B)
+_GLYPH = {**{chr(ord("0") + i): 0x0c + i for i in range(10)},
+          **{chr(ord("a") + i): 0x34 + i for i in range(26)}, " ": 0x01}
+
+
+def git_short_hash():
+    try:
+        h = subprocess.check_output(["git", "rev-parse", "--short=7", "HEAD"],
+                                    cwd=str(Path(__file__).parent), stderr=subprocess.DEVNULL).decode().strip()
+        return h if len(h) == 7 and all(c in "0123456789abcdef" for c in h) else None
+    except Exception:
+        return None
+
+
+def version_stamp_patch():
+    """(addr, expect, replace) stamping the current git short-hash, or None."""
+    h = git_short_hash()
+    if not h:
+        return None
+    glyphs = bytes([_GLYPH["v"]] + [_GLYPH[c] for c in h] + [_GLYPH[" "]] * 4)  # 12 glyphs
+    assert len(glyphs) == len(STAMP_EXPECT)
+    return (STAMP_ADDR, STAMP_EXPECT, glyphs)
 
 
 def load_asm(path):
@@ -62,12 +92,18 @@ def build(orig, asm, data_patches=()):
             prefix[addr - BASE:addr - BASE + len(b)] = b
         else:
             ap[addr - DEC:addr - DEC + len(b)] = b
-    for addr, exp, rep in data_patches:
+    stamp = version_stamp_patch()
+    all_patches = list(data_patches) + ([stamp] if stamp else [])
+    for addr, exp, rep in all_patches:
         assert addr >= DEC, "data patches target the AP stream"
         off = addr - DEC
         assert len(exp) == len(rep), "data patch must be size-neutral"
         assert bytes(ap[off:off + len(exp)]) == exp, f"data patch @ {addr:#x}: expect mismatch"
         ap[off:off + len(rep)] = rep
+    if stamp:
+        print(f"  version stamp: no-signal line shows v{git_short_hash()}")
+    else:
+        print("  version stamp: SKIPPED (no git hash available)")
     built = mm.repack(orig, new_ap=bytes(ap), new_prefix=bytes(prefix))
     assert mm._check(built), "patched image failed self-check"
     return built
