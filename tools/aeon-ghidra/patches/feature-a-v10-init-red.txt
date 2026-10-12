@@ -1,0 +1,5 @@
+# Feature a (v10): display init writes the per-window 3-3-2 no-signal colour as
+# 0xff (white) directly, bypassing the setter. Make those red (0xe0) too.
+# `b.ori r4,r0,0xff` (5080ff) -> `b.ori r4,r0,0xe0`. Format: RAM expect replace.
+0x1aa9f0 5080ff 5080e0
+0x1aad20 5080ff 5080e0

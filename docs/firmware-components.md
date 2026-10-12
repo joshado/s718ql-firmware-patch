@@ -278,13 +278,16 @@ consecutive per-language sub-blocks (En `0x2ecd94`, Es `0x2eceb0`, Fr `0x2ecffc`
 De `0x2ed162`…), each with the same structure (4 source messages + "Searching" +
 HDMI labels + "Please wait").
 
-**For feature (a):** the no-signal *renderer* can be reached this way — find the
-wrapper whose table points at the no-signal sub-blocks (ID/selector still to be
-pinned; the per-language table for that screen did not resolve by a simple
-pointer scan), then trace ITS callers back to the no-signal detection handler,
-which is where the blue background fill lives. This needs decompiling
-`0x219504` + the wrapper cluster under full coverage (sweep boundaries make that
-fiddly) — a multi-step trace, but the mechanism is now understood.
+**For feature (a):** resolved by a different route — see
+[feature-a-osd-model.md](feature-a-osd-model.md). The OSD is the stock MStar
+monitor framework: a **menu page table** at `0x2d9200` (stride `0x1c`, indexed by
+`g_osd_mode`), `0x2c`-byte items whose display entries point at small getter
+stubs returning icons/strings, compressed mono fonts, and a 248-entry palette at
+`0x2d2dc8`. The "master table" puzzles above date from before the load-base fix
+(prefix + inflated AP at `0x180000`) and were not revisited; `osd_master_table`
+(`0x2a9974`) is listed as confirmed in `symbols.tsv` on the corrected base. The
+blue background was never in the OSD at all (it was the display windows showing
+video with no input).
 
 ### Menu text encoding (important for features a & b)
 

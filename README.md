@@ -37,8 +37,11 @@ firmware/
     actiontec/     Realtek install.img contents (tar) + ext4 images
     mcu/           NXP + Nuvoton microcontroller images as flat binaries
 tools/           our scripts (see below); kept separate from untrusted data
+overlays/        our own files injected into a rebuilt image (not vendor data)
 docs/            the writeups
 decompiled/      hand-decompiled C for reading (not buildable, not verified)
+dist/            build outputs (the large .bin/.img are gitignored and
+                 regenerated; only the per-image MANIFEST.txt records are kept)
 ```
 
 > **Safety note on handling the images.** The contents of `firmware/extracted`
@@ -71,6 +74,10 @@ decompiled/      hand-decompiled C for reading (not buildable, not verified)
   (what's solved, what's still open).
 - [`docs/feature-targets.md`](docs/feature-targets.md) — the wishlist and where
   in the firmware each item actually lives.
+- [`docs/feature-a-osd-model.md`](docs/feature-a-osd-model.md) — how the scaler
+  composes its screens (frame colour, display windows, OSD) and the no-signal
+  colour fix; [`docs/feature-a-status.md`](docs/feature-a-status.md) is the
+  summary and attempt log.
 - [`docs/nxp-mcu.md`](docs/nxp-mcu.md) — NXP system MCU disassembly notes: pin
   map, settings block, power state machine, standby modes and WoL.
 
@@ -81,9 +88,10 @@ decompiled/      hand-decompiled C for reading (not buildable, not verified)
   CRC-32 over the AP flash region). The AP is standard raw DEFLATE. The CPU is
   MStar's AEON 32-bit RISC ("risc32", confirmed); we now have a working
   **disassembler, decompiler and assembler** for it (`tools/aeon-ghidra/`), so
-  data edits, in-place code patches and repack/re-sign are all specified. No C
-  compiler exists for AEON (new logic = hand-written assembly). Not yet flashed;
-  scaler flashing needs an SPI-programmer recovery path first.
+  data edits, in-place code patches and repack/re-sign all work. No C compiler
+  exists for AEON (new logic = hand-written assembly). **Flashed and running on
+  the projector** with two fixes: black no-signal/searching screens (feature a)
+  and the `unplg` typo (feature b). Build + flash steps: `docs/rebuilding.md` §1.
 - **Network module (`ACTUPGRADE.bin`)** — container is a flat record table with
   a 32-bit additive checksum we reproduce exactly. Linux/MIPS, EZCast Pro stack.
   Filesystems extract cleanly.

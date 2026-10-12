@@ -8,11 +8,17 @@ BootCode; this script has only been run against the simulator below.
 
 usage: nxp_flash.py IMAGE                     show what would be sent
        nxp_flash.py IMAGE --selftest          run against a simulated BootCode
+       nxp_flash.py IMAGE --port DEV --check  cable test, writes nothing (see below)
        nxp_flash.py IMAGE --port DEV --flash  really flash (needs pyserial)
 
 IMAGE is an Intel HEX file, or a flat binary whose offset 0 is flash address 0.
 Put the projector in download mode first: hold Power, apply AC, release when
 the Power LED blinks white (4-6 s). Start this script only after that.
+
+--check is for a projector in ordinary standby (NOT download mode): it sends
+the application's own "#00501 1" query (WoL flag) and expects "P0" or "P1"
+back. A reply proves the adapter, cable wiring and baud rate before anything
+is erased.
 """
 import argparse
 import sys
@@ -183,12 +189,26 @@ def flash(port, image, progress=True):
     port.write(bytes([CMD_RUN]))
 
 
+def check_link(port):
+    port.reset_input_buffer()
+    port.write(b"#00501 1\r")
+    reply = port.read(3)
+    if reply in (b"P0\r", b"P1\r"):
+        print(f"link ok: MCU answered {reply!r} (WoL flag = {chr(reply[1])})")
+        return 0
+    print(f"no valid answer (got {reply!r}). Check the port, try a null-modem "
+          "adapter, and make sure the projector is in standby, not download mode.")
+    return 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("image", type=Path)
     ap.add_argument("--port")
     ap.add_argument("--baud", type=int, default=19200)
     ap.add_argument("--flash", action="store_true", help="really write to the device")
+    ap.add_argument("--check", action="store_true",
+                    help="cable test against a projector in standby; writes nothing")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--force", action="store_true", help="ignore image sanity checks")
     args = ap.parse_args()
@@ -211,6 +231,14 @@ def main():
         print("selftest:", "ok" if ok else "MISMATCH")
         return 0 if ok else 1
 
+    if args.check:
+        if not args.port:
+            ap.error("--check needs --port")
+        import serial  # pyserial
+        with serial.Serial(args.port, args.baud, bytesize=8, parity="N", stopbits=1,
+                           timeout=2) as port:
+            return check_link(port)
+
     if not args.flash:
         print("dry run: nothing sent. Add --port DEV --flash to write.")
         return 0
@@ -218,7 +246,7 @@ def main():
         ap.error("--flash needs --port")
     import serial  # pyserial
     with serial.Serial(args.port, args.baud, bytesize=8, parity="N", stopbits=1,
-                       timeout=5) as port:
+                       timeout=10) as port:
         start = time.time()
         flash(port, image)
         print(f"done in {time.time() - start:.0f} s; BootCode told to start the app")

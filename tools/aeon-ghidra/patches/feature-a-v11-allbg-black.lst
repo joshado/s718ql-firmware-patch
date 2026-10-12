@@ -1,0 +1,29 @@
+# Feature a (v11): ALL no-signal/searching backgrounds -> BLACK, held.
+# Same two hooks as v10 (feature-a-v10-allbg-red.lst, hardware-confirmed red);
+# only the forced 3-3-2 colour changes: 0xe0 (red) -> 0x00 (black).
+# Cave A (hook @0x1ac05b): while g_osd_mode is 4 or 0x0b, force "show colour".
+# Cave C (hook @0x1c7004, in the real colour setter 0x1c6fe9): colour := 0x00.
+# Companion data patches: feature-a-v11-black-data.txt.
+@0x182048
+b.movhi r7,0x30
+b.lbz r7,0x7b98(r7)
+b.beqi r7,0x4,0x182057
+b.bnei r7,0xb,0x182059
+b.movi r4,0x0
+b.addi r1,r1,-0x14
+b.sw 0x10(r1),r9
+b.j 0x1ac061
+b.ori r4,r0,0x0
+b.mov r12,r4
+b.ori r7,r0,0x84
+b.mul r3,r3,r7
+b.j 0x1c700c
+# --- hook A: 6 bytes (addi + sw r9) = b.j + one 2-byte nop ---
+@0x1ac05b
+b.j 0x182048
+b.movi r0,0x0
+# --- hook C: 8 bytes (mov r12,r4; ori r7,r0,0x84; mul r3,r3,r7) = b.j + two nops ---
+@0x1c7004
+b.j 0x182063
+b.movi r0,0x0
+b.movi r0,0x0

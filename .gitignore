@@ -10,7 +10,14 @@ firmware/
 tools/aeon-ghidra/*.zip
 **/scaler_symbols.tsv
 **/sample.c
-dist/
+
+# dist/ holds large build outputs (regenerated from the Dell zip + tools/),
+# but the hand-written build-record manifests are kept under version control.
+dist/**
+!dist/
+!dist/*/
+!dist/*/MANIFEST.txt
+
 firmware/unpacked/scaler/ap_combined_patched.bin
 firmware/unpacked/scaler/feature-a-asm.txt
 

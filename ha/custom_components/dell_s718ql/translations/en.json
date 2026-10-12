@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dell S718QL projector",
+        "description": "Switch the projector on before adding it: in standby it only listens for Wake-on-LAN.",
+        "data": {
+          "name": "Name",
+          "host": "IP address",
+          "mac": "Wired MAC address",
+          "broadcast_address": "Wake-on-LAN broadcast address"
+        },
+        "data_description": {
+          "mac": "Used to wake the projector from standby.",
+          "broadcast_address": "255.255.255.255, or your subnet's broadcast address if Home Assistant cannot send to that."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No PJLink answer from that address. Is the projector switched on?",
+      "invalid_mac": "Not a valid MAC address."
+    },
+    "abort": {
+      "already_configured": "This projector is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "light_hours": { "name": "Light source hours" }
+    }
+  }
+}

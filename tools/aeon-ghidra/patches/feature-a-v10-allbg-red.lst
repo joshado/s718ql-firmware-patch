@@ -1,0 +1,35 @@
+# Feature a (v10): ALL no-signal/searching backgrounds -> RED, and HELD.
+# Model: docs/feature-a-osd-model.md. Each display window shows either video or
+# its packed 3-3-2 "no-signal colour" byte, selected by a per-window bit that
+# FUN_ram_001ac05b(mask, v) writes (v=0 colour, v=1 video).
+#
+# Cave A (hook @0x1ac05b, FUN_ram_001ac05b entry): while a no-signal page is up
+#   (g_osd_mode @0x307b98 == 4 or 0x0b) force v=0, so nothing can switch the
+#   windows back to "video" (the steady blue). r7 is scratch (caller-saved).
+# Cave C (hook @0x1c7004, inside the one real colour setter 0x1c6fe9 that
+#   osd_set_bg_color_332 / FUN_ram_001c7137 / the burn-in cycle all reach):
+#   override the 3-3-2 colour argument with 0xe0 (red). 0x00 here = black.
+# Each cave re-executes the displaced original instructions, then jumps back.
+@0x182048
+b.movhi r7,0x30
+b.lbz r7,0x7b98(r7)
+b.beqi r7,0x4,0x182057
+b.bnei r7,0xb,0x182059
+b.movi r4,0x0
+b.addi r1,r1,-0x14
+b.sw 0x10(r1),r9
+b.j 0x1ac061
+b.ori r4,r0,0xe0
+b.mov r12,r4
+b.ori r7,r0,0x84
+b.mul r3,r3,r7
+b.j 0x1c700c
+# --- hook A: 6 bytes (addi + sw r9) = b.j + one 2-byte nop ---
+@0x1ac05b
+b.j 0x182048
+b.movi r0,0x0
+# --- hook C: 8 bytes (mov r12,r4; ori r7,r0,0x84; mul r3,r3,r7) = b.j + two nops ---
+@0x1c7004
+b.j 0x182063
+b.movi r0,0x0
+b.movi r0,0x0

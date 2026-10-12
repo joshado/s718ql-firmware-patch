@@ -15,18 +15,18 @@
 0x002a9974	data	osd_master_table	[C] screen_id -> per-language (ptr,len) table. master[4] -> no-signal screen
 0x00307b98	data	g_osd_mode	[C] current OSD screen id; ==4 is the no-input/no-signal screen
 0x002f0594	data	str_nosignal_hdmi1_en	[C] "No HDMI 1 (2.0) signal. Press <Source>..." (English); master[4][0]
-0x001e73fe	func	osd_no_input_handler	[C] no-input/no-signal state handler: sets g_osd_mode=4, branches on input flags DAT_ram_00304b88, calls scaler register writes (the blue background fill is among these)
+0x001e73fe	func	osd_no_input_handler	[C] no-input/no-signal state handler: picks g_osd_mode (4/0x0b no-signal, 0x0e searching, 5, 6, 0x0c, 0x0d) from input flags DAT_ram_00304b88. Does NOT paint the background
 0x001c62f9	func	scaler_reg_write	[?] (reg,val,mask) register write; e.g. (0x101d20,0,1)
 #
 # ---- traced from osd_no_input_handler (0x1e73fe) ----
-0x001ff83c	func	osd_set_frame_color	[C] "Enable Frame Color"; hard-writes WHITE (0xffffff) to frame-colour reg 0x90102f33 = the "searching" screen (g_osd_mode==0x0e). NOT the blue screen
+0x001ff83c	func	osd_set_frame_color	[C] win_enable_frame_color(i,0) for window 0, or all four when g_sys_ctx+0x45c!=0: windows show their 3-3-2 colour (0xff) instead of video
 0x001fe47d	func	osd_draw_mute_logo	[C] references "Mute BMP Logo"; draws the mute/logo screen
 0x001f1530	func	scaler_set_tcon_format	[C] references "TCON_Format%d"; timing-controller setup
 0x001c91cf	func	dbg_print	[C] debug print (no-op unless g_dbg_enable set); takes a string arg
 0x001c6162	func	scaler_mmio_write_byte	[C] byte write to a scaler register: *(g_scaler_mmio_base + enc(reg)) = val
 0x001c64ed	func	scaler_reg_write24	[C] writes a 24-bit value (e.g. RGB colour) to reg,reg+1,reg+2 via scaler_mmio_write_byte
-0x001e17b6	func	scaler_setup_17b6	[?] writes scaler reg 0x101d20 (called by no-input handler)
-0x001e2d66	func	scaler_setup_2d66	[?] writes scaler reg 0x101d40
+0x001e17b6	func	scaler_setup_17b6	[C] Osd_Hide: OSD window 1 off (0x101d20 bit0); window 3 off unless g_osd_mode is 4/0x0b. Name is historical; not a scaler setup
+0x001e2d66	func	scaler_setup_2d66	[C] OSD window 2 off (0x101d40 bit0). Name is historical
 0x001e2b82	func	scaler_setup_2b82	[?] scaler register setup
 0x001f0110	func	scaler_setup_f0110	[?] larger scaler/panel setup (many sub-calls)
 0x00304bdc	data	g_scaler_mmio_base	[C] base pointer for scaler MMIO register writes
@@ -38,13 +38,11 @@
 0x002cfd98	data	g_timer_cfd98	[?] set to 100 on signal loss
 #
 # ---- no-signal BACKGROUND colour (feature a) ----
-# The STABLE blue no-signal screen = the DEFAULT value of frame-colour reg
-# 0x90102f33 (set at init, NOT by any AP literal). The AP only ever writes WHITE
-# (0xffffff) to it, in the "searching"/diag path. To change the blue: patch in a
-# colour write on the mode-4 no-signal path, or patch the init default. See
-# docs/feature-targets.md (a).
-0x001be86b	func	osd_set_bg_color_332	[C] set free-run background colour. arg2 = packed 3-3-2 RGB (bits5-7=R,2-4=G,0-1=B): 0x03=blue 0xe0=red 0x1c=green 0xff=white 0x00=black. writes frame-colour reg 0x90102f33. callers pass white/black/cycle-table only
-0x001c70ec	func	osd_set_frame_color_rgb	[C] set_frame_color(R,G,B) -> reg 0x90102f33 (24-bit). ONLY caller passes (0xff,0xff,0xff)=white
+# SOLVED 2026-10-12 -- see docs/feature-a-osd-model.md. The steady blue was the
+# display windows showing VIDEO with no input, not a colour register. 0x90102f33
+# is the frame colour (visible only where no window covers the panel).
+0x001be86b	func	osd_set_bg_color_332	[C] wrapper (win_group, colour332): wait FUN_ram_001d11b0 then tail-jump to win_set_nosig_color_332. 3-3-2 = bits5-7 R, 2-4 G, 0-1 B: 0x03 blue 0xe0 red 0x1c green 0xff white 0x00 black
+0x001c70ec	func	osd_set_frame_color_rgb	[C] set_frame_color(R,G,B) -> frame-colour reg 0x90102f33 only. Caller FUN_ram_002027b0 passes white = the surround of the searching/splash logo. PATCHED (feature a): 0x1c7119 forces black
 0x001e76f7	func	osd_nosignal_color_cycle	[C] BURN-IN colour cycle (g_osd_mode==0x0d, separate demo mode; NOT the stable no-signal screen) through g_nosig_bg_colors
 0x002cf6e4	data	g_nosig_bg_colors	[C] 8 packed-3-3-2 colours for the burn-in cycle: [0]black [1]blue [2]purple [3]red [4]green [5]blue [6]cyan [7]magenta
 0x001c64ed	func	scaler_reg_write24	[C] write 24-bit value (RGB) to reg,reg+1,reg+2
@@ -67,7 +65,7 @@
 0x001c61c5	func	scaler_mmio_rmw_bit	[I] locked read-modify-write: SET masked bits if param2!=0 else CLEAR them; brackets access with g_scaler_bus_lock_count + HW lock reg base+0x203034
 0x001c629d	func	scaler_mmio_read_word	[C] 16-bit read: (reg+1)<<8 | reg via scaler_mmio_read_byte
 0x001c62ce	func	scaler_mmio_write_word	[C] 16-bit write: reg=lo byte, reg+1=hi byte via scaler_mmio_write_byte
-0x001c63ce	func	scaler_rmw_bit_windows	[?] for each window-bit set in param1 mask, locked-RMW a per-window register taken from g_window_ctx[win] (generic multi-window bit write)
+0x001c63ce	func	scaler_rmw_bit_windows	[C] per-window double-buffer enable/latch: RMW bank-0 byte 0x84 (ctx-0x7fffff7c) bits 0/2 for each window in mask. Brackets colour writes; not a display gate
 0x001c646f	func	scaler_reg_write_word_masked	[C] 16-bit masked RMW (reg,val,mask): scaler_reg_write(reg,..) + scaler_reg_write(reg+1,..)
 0x001c64a9	func	scaler_mmio_read_24	[C] 24-bit read reg,reg+1,reg+2 (read counterpart of scaler_reg_write24)
 0x001c6528	func	scaler_reg_write24_masked	[C] 24-bit masked RMW (reg,val,mask); low two bytes via scaler_reg_write, top byte locked-RMW inline
@@ -77,13 +75,13 @@
 # 2. Scaler per-channel output enable / coefficient writers
 #    Channel register base 0x101d00 + ch*0x20 (ch0=0x101d00, ch1=0x101d20, ch2=0x101d40)
 # ======================================================================
-0x001c369a	func	scaler_ch_set_enable	[I] write bit0 of reg (0x101d00 + ch*0x20) = (val!=0); per-channel scaler output enable/mute. ch1=0x101d20 matches scaler_setup_17b6, ch2=0x101d40 matches scaler_setup_2d66
-0x001c36b4	func	scaler_ch_write_coord16	[?] 16-bit write to per-channel sub-reg (0x101d00/02/14/1a + ch*0x20) selected by param2; window/scaler coord or coef
+0x001c369a	func	scaler_ch_set_enable	[C] OSD WINDOW on/off (MStar drvOSD_SetWndOn): bit0 of 0x101d00 + win*0x20. Name is historical; these are OSD windows, not scaler channels
+0x001c36b4	func	scaler_ch_write_coord16	[C] OSD window ctrl write (drvOSD_SetWndCtrl): (win, ctrl 0..3 -> +0x00/02/14/1a, value, mask). Name is historical
 #
 # ======================================================================
 # 3. OSD / screen state machine + input handling (around osd_no_input_handler 0x1e73fe)
 # ======================================================================
-0x001e2e3d	func	osd_set_ch2_mute_for_mode	[I] calls scaler_ch_set_enable(2,x) (reg 0x101d40) chosen by g_osd_mode range: modes 0x11..0x5f except 'J' -> arg 0, else arg 1
+0x001e2e3d	func	osd_set_ch2_mute_for_mode	[C] OSD window 2 on/off by g_osd_mode: modes 0x11..0x5f except 'J' -> off, else on. Name is historical
 0x001e3156	func	osd_dispatch_event	[I] OSD state-transition step: takes an event code (0x24/0x36/0x3e seen); forces g_osd_mode='B' per g_osd_substate; returns 1 when screen inactive (g_osd_mode high bit set). Tail-twin of osd_no_input_handler
 0x001e7287	func	osd_process_event	[?] OSD/menu event filter: takes event/key code, branches on g_osd_mode and ctx flag byte (g_sys_ctx+0x44b), drives submenu index bRam00307bf2
 0x001e82ea	func	osd_draw_current_screen_text	[C] "Load prop font"; renders osd_master_table[g_osd_mode] entry for current language (g_sys_ctx+0x47b) via osd_render_glyph_string; modes>=0x70 use osd_master_table_hi
@@ -110,14 +108,39 @@
 0x002cfc70	data	g_scaler_state_tbl	[I] per-scaler/window state records, stride 0x4c. Fields: +0x4 timing byte, +0x6 mode word, +0x8 settle timer, +0x10 flags(0x1=active/dirty), +0x14 sync/timing status (0x3 polarity bits, 0xc sync-loss)
 0x0030502d	data	g_port_status_prev	[I] per-port previous-status shadow bytes (indexed 1..3), compared against live status in sm_poll_input_scaler_window to detect edges
 #
-# ---- no-signal screen renderer (feature a); two-layer: free-run blue + OSD overlay ----
-# Verified in-session: 0x1dbc84 draws the two GRAM blobs + text for mode 4;
-# 0x21c727 is the 2bpp/12-bit-code GRAM expander. No RGB CLUT exists (2bpp indexed,
-# index0=transparent, index3=white). Blue = free-run reg 0x90102f33 boot default.
-0x001dbc84	func	osd_nosig_draw	[C] mode-4 no-signal screen draw handler (dispatch tbl 0x2d9200 +0x14): streams osd_nosig_logo_bmp + icon via osd_gram_write_rle, text via osd_draw_current_screen_text
-0x0021c925	func	osd_gram_write_rle	[C] OSD-GRAM RLE writer: GRAM ptr via ports 0x101c66/67/68, streams 16-bit words (top nibble=repeat, low 12 bits=code); 2bpp indexed, 6 pixels/code
-0x0021c727	func	osd_gram_expand_2bpp	[C] expands two 1bpp bitplanes into GRAM 2 bits/pixel (OSD is 4-level indexed; ctrl reg 0x101c6d, GRAM port 0x101c68)
+# ---- no-signal screen OSD pieces (feature a) ----
+# The no-signal logo is OSD TEXT: mono font glyphs + a palette colour attribute.
+# A 248-entry palette exists at 0x2d2dc8 (earlier "no CLUT" note was wrong).
+0x001dbc84	func	osd_nosig_draw	[C] mode-4 LoadFont callback (menu page table 0x2d9200 +0x14): loads the logo glyphs at font index 0x20 and the ? icon at 0xcf. Draws nothing. Name is historical
+0x0021c925	func	osd_gram_write_rle	[C] compressed MONO font loader (MStar LoadCompressedFont): (font index, data, count) via OSD RAM port 0x101c66/67/68; 16-bit words, top nibble=repeat, low 12 bits=data. Name is historical
+0x0021c727	func	osd_gram_expand_2bpp	[C] 2-bit colour font loader (two bitplanes -> font RAM). Used for colour icons, not for the no-signal logo
 0x001e82ea	func	osd_draw_current_screen_text	[C] "Load prop font": renders osd_master_table[g_osd_mode] for current language via osd_render_glyph_string
-0x002a6c92	data	osd_nosig_logo_bmp	[C] monochrome 2bpp OSD bitmap = the white Dell logo on the no-signal screen (GRAM index 0x20). NOT the JPEG
-0x002a74d8	data	osd_nosig_icon_bmp	[C] second 2bpp OSD graphic drawn by osd_nosig_draw at GRAM index 0xcf
-0x002d9200	data	osd_dispatch_table	[C] OSD per-mode handler table, stride 0x1c, indexed by g_osd_mode; +0x14=draw handler, +0x18=flags. mode4 entry @0x2d9270 -> 0x1dbc84
+0x002a6c92	data	osd_nosig_logo_bmp	[C] compressed mono FONT data for the no-signal Dell logo glyphs (loaded at font index 0x20). NOT the JPEG
+0x002a74d8	data	osd_nosig_icon_bmp	[C] compressed mono font data for the ? icon glyphs (font index 0xcf)
+0x002d9200	data	osd_dispatch_table	[C] MStar MENU PAGE TABLE, stride 0x1c, indexed by g_osd_mode: +0 XSize +1 YSize +4 prev page +8 items(0x2c each) +0xc item count +0x10 Exec fn +0x14 LoadFont fn +0x18 flags. mode4 @0x2d9270
+#
+# ======================================================================
+# 5. Display-window colour/video gate + OSD internals (feature a, 2026-10-12)
+#    [C] here = confirmed from code AND by hardware result (builds v10/v11).
+# ======================================================================
+0x001ac05b	func	win_set_show_video	[C] (mask, v): per window in mask, bank 0x10 byte 0x32 bit (0x20 even / 0x02 odd): v=1 show VIDEO, v=0 show the window's 3-3-2 no-signal colour. PATCHED: entry hooked -> cave 0x182048 forces v=0 while g_osd_mode is 4/0x0b
+0x001c6fe9	func	win_set_nosig_color_332	[C] the one real colour setter (win_group, colour332): writes per-window 3-3-2 bytes (bank 0x0f byte 0x2f even / bank 0x10 byte 0x48 odd) AND frame colour 0x90102f33 expanded from it. PATCHED: 0x1c7004 hooked -> cave 0x182063 forces colour 0x00
+0x001c7137	func	win_enable_frame_color	[C] "[msScalerAP] Enable Frame Color" (win, v): win_set_show_video(mask, v); if v==0 then win_set_nosig_color_332(win, 0xff)
+0x001c7dd2	func	win_set_mute_state	[I] (win, v): v=1 -> per-scaler setup then win_set_show_video(mask,1); v=0 -> arm the countdown byte at 0x30f724+win*0x84. Called from sm_poll_input_scaler_window
+0x001be71a	func	frame_color_fullscreen	[C] (1,R,G,B): save+clear display-window enable bits (bank 0x20 byte 0x20 bits0/1), write frame colour -> full-screen solid colour; (0,..) restores. Saved colour in 0x2cf710
+0x001f00d4	func	frame_color_grey_ramp	[C] 256-step grey ramp via frame_color_fullscreen, then restore. No static caller
+0x002027b0	func	osd_splash_exec	[I] menu page 7 Exec: osd_set_frame_color_rgb(white), draw the JPEG logo (FUN_ram_00202710 -> FUN_ram_001efda8), Osd_Hide, panel on, Osd_Show. Source of the searching-screen white surround
+0x001efda8	func	logo_jpeg_draw	[C] decodes the Dell logo JPEG (TEL id 0xc500) into frame memory for a display window ("Get JPG BINFO", "Decompress OK")
+0x001e1820	func	osd_draw_menu	[C] MStar DrawOsdMenu: per-g_osd_mode window size/position/colours, calls the page LoadFont fn, draws items
+0x001e17e0	func	osd_show	[C] Osd_Show: OSD window 1 on; for menu modes also windows 2 and 3 off
+0x001e2e67	func	osd_init	[C] OSD init: global OSD regs, windows 1..3 ctrl/alpha/text base, palette, base fonts
+0x001db9a7	func	osd_load_palette	[C] loads the 248-entry OSD palette from osd_palette via port select 0xa/0xd, then colour-key flags via 0xc
+0x001c3656	func	osd_wnd_set_fix_alpha	[C] (win, level 0/1/2, value): +0x0d/+0x19/+0x0c of the window block, low 6 bits
+0x001c3708	func	osd_wnd_set_text_base	[C] (win, addr): text-RAM base at +0x10/11
+0x001c378f	func	osd_wnd_set_fix_color	[C] (win, R, G, B): window fixed colour at +0x16/17/18. Only static caller passes window 0, black
+0x002d2dc8	data	osd_palette	[C] 248 x {R,G,B,colour-key}. idx 0/0xf black, 2 white, 0xc Dell blue 00 85 c3; c0 c0 c0 + key=1 is transparent
+0x002d3834	data	osd_nosig_items	[C] the 6 menu items (0x2c each) of page 4. Item 0/1 show the logo icons
+0x002da22e	data	osd_nosig_logo_icon	[C] icon {w=0x18,h=0x10,colour x3,glyphs 0x21..0x46} = the no-signal Dell logo. PATCHED: colour c2 -> 00 @0x2da230 (hidden)
+0x002da0a9	data	osd_nosig_logo_icon_alt	[C] same logo icon with colour 0x24. PATCHED: colour -> 00 @0x2da0ab
+0x00182048	func	patch_cave_gate	[C] OUR CODE (feature a): gate cave for win_set_show_video; empty padding in stock
+0x00182063	func	patch_cave_color	[C] OUR CODE (feature a): colour cave for win_set_nosig_color_332; empty padding in stock

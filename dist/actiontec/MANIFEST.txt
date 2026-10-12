@@ -1,0 +1,142 @@
+===============================================================================
+ Actiontec (Realtek RTD1295) install.img  --  ROOTED build
+ Dell S718QL projector  --  authorized owner modification of own device
+ Built: 2026-10-11
+===============================================================================
+
+PURPOSE
+  Produce a flashable install.img that guarantees the owner a persistent,
+  network-reachable ROOT shell on the Actiontec/Realtek RTD1295 module.
+
+IMPORTANT CORRECTION TO THE TASK PREMISE
+  The task assumed this module is Android (adbd / ro.secure / ro.debuggable /
+  build.prop). It is NOT. The rootfs is a BusyBox + glibc embedded Linux
+  (SysV/BusyBox init, /etc/inittab, /sbin/init->busybox) -- a ScreenBeam-style
+  wireless-display appliance. There is no Android property system, no *.prop,
+  no init*.rc, and no adbd anywhere in the image. The Android rooting knobs do
+  not exist and could not be set. Root access was delivered the Linux way
+  (an always-on, unauthenticated root shell service), which is the faithful
+  equivalent of "adbd running as root with ro.secure=0".
+
+-------------------------------------------------------------------------------
+FILES
+-------------------------------------------------------------------------------
+  SOURCE   firmware/extracted/Dell-s718ql-projector-firmware-m0r005-2018-11-30/Actiontec FW/install.img
+           size   177213472 bytes
+           SHA256 20de0ab40ce5ec227bad95ca4dafe403c039a3f652984f1e36a2e7a7ae91ae89
+           MD5-trailer (last 32 ASCII bytes) 7a28d01aa0082c2d5a9f8a6db1033fd8
+
+  OUTPUT   dist/actiontec/install.img
+           size   177213472 bytes  (identical length to source)
+           SHA256 08a6bf3353dfb52ddf92489284e767e056603414747d181daaba31f909859d6d
+           MD5-trailer (last 32 ASCII bytes) 38632fdcb0916cb997c2da9cb78838dc  (recomputed, self-consistent)
+
+  PATCH    dist/actiontec/S98adbroot   (the init script added to the rootfs)
+           SHA256 82ec48f5ea240d159b6d9c92faccb0c14fa17748eb5cd46d228428a9ffb53274
+
+-------------------------------------------------------------------------------
+CONTAINER FORMAT (reverse-engineered this build)
+-------------------------------------------------------------------------------
+  install.img = [ GNU tar archive, padded to a 512-byte block boundary,
+                  ending at offset 177213440 ]
+              + [ 32 ASCII-hex bytes = md5( bytes[0 : 177213440] ) ]
+  This trailing MD5 is the package integrity gate (a known Realtek install.img
+  pattern). secure_boot=0 and signature="" in config.txt => no RSA/efuse
+  signature check (install_a's do_sha256 / sha256_sig path is gated off).
+  config.txt carries NO per-image verify=/checksum= tokens, so editing a
+  partition trips no stored per-part hash. install_a itself does not parse the
+  tar ("Install_a doesn't parse the tarfile"); an outer step untars, install_a
+  burns the extracted files.
+
+  Tar member order (physical, preserved EXACTLY, unchanged):
+    ALSADaemon, config.txt, customer.tar, generic/,
+    generic/gold.rescue.emmc.uImage, generic/rootfs.ext4.bin,
+    generic/etc.ext4.bin, generic/gold.rescue.emmc.dtb, generic/emmc.uImage,
+    generic/android.emmc.dtb, generic/bluecore.audio,
+    generic/gold.bluecore.audio, generic/factory.tar, generic/bootloader.tar,
+    generic/gold.rescue.root.emmc.cpio.gz_pad.img, generic/bootfile.image,
+    install_a, mke2fs, teeUtility.tar
+
+-------------------------------------------------------------------------------
+BUILD METHOD (in-place splice -- strongest round-trip guarantee)
+-------------------------------------------------------------------------------
+  Rather than re-tar (which would perturb GNU metadata), the modified
+  rootfs.ext4.bin was spliced byte-for-byte into the original tar at its exact
+  data offset (12366848, length 112051200), then the 32-byte MD5 trailer was
+  recomputed. Everything outside the rootfs data region and the final 32 bytes
+  is therefore literally the original bytes.
+
+  ROUND-TRIP PROOF (golden rule): splicing the UNMODIFIED rootfs back and
+  recomputing the trailer reproduced the source BYTE-IDENTICALLY
+  (SHA256 == 20de0ab4..., `cmp` clean). Guarantee achieved: BYTE-IDENTICAL for
+  unmodified input; for the modified build, differences are provably confined
+  to (a) the rootfs.ext4.bin region and (b) the recomputed MD5 trailer -- 0
+  differing bytes anywhere else (562 diff ranges: 555 in the ext4 region, 7 in
+  the 32-byte trailer, 0 elsewhere). Tar member list/order/sizes IDENTICAL.
+
+-------------------------------------------------------------------------------
+EXACT CHANGE INSIDE rootfs.ext4.bin  (/ partition, mounted at /)
+-------------------------------------------------------------------------------
+  rootfs.ext4.bin  BEFORE SHA256 f239f54bb6063704b9122448f1b4c33b5dad4b2592c45453037c75f67dcd219d
+                   AFTER  SHA256 d69ddbd12b6e4d0a6c626f5b8bb2eb2b0a39376c1002a06d7271d3d02e49a5b0
+                   size unchanged (112051200); e2fsck -fn clean before & after.
+
+  ADDED one file (nothing else modified/removed):
+    /etc/init.d/S98adbroot   mode 0755, owner root:root, 1077 bytes
+      Starts  `/usr/sbin/telnetd -l /bin/sh -p 1023 &`  from rcS at boot.
+      BusyBox telnetd with -l /bin/sh spawns /bin/sh directly (no login, no
+      password); started by init it runs as ROOT. This is the adbd-as-root
+      analog: an always-on, network-reachable, unauthenticated root shell.
+      Reach it with:  telnet <device-ip> 1023
+      rcS runs /etc/init.d/S??* in order, so S98adbroot auto-starts after
+      networking (S40network) and inetd (S41inetd); persistent across reboot
+      because it lives on the flashed rootfs partition.
+
+-------------------------------------------------------------------------------
+ROOT-ACCESS LEVERS (what grants root on this image)
+-------------------------------------------------------------------------------
+  Pre-existing in the STOCK image (left intact, documented, not relied upon):
+    * /etc/shadow: root has an EMPTY password  (root::...)
+    * /etc/inittab: getty on serial ttyS0 @115200 -> passwordless root console
+    * /etc/inetd.conf: telnet enabled + S41inetd starts inetd -> telnet :23
+      reaches /bin/login which accepts empty-password root
+    * /bin/busybox is setuid-root; /bin/su present
+  Added by this build (the guaranteed, login-free path):
+    * /etc/init.d/S98adbroot -> telnet :1023 == direct root /bin/sh, no auth
+  su: NOT added as a separate binary -- busybox `su` already present & setuid;
+      a standalone su is unnecessary.
+  SELinux: N/A (BusyBox Linux, no SELinux policy); nothing set permissive.
+
+-------------------------------------------------------------------------------
+RISK / FLASH-SAFETY FINDINGS
+-------------------------------------------------------------------------------
+  * secure_boot=0 and signature="" => bootloader/updater does NOT reject a
+    modified image on a signature. Verified against install_a strings (the
+    do_sha256/signature path is the secure-boot branch, gated off here).
+  * Package MD5 trailer recomputed exactly => passes the integrity gate.
+  * dm-verity: NOT present. /etc/fstab mounts / as plain ext2/ext4 (ro,noauto);
+    this is BusyBox Linux, not AVB/verity Android. Editing the rootfs does NOT
+    require disabling verity or recomputing a hash tree. No verity brick risk.
+  * GOLD / rescue images ARE in this package (config.txt: GOLDrescueDT,
+    GOLDRootFS, GOLDKernel, GOLDaudio; install_rescue_root=y) => a bad flash is
+    recoverable. Lowest-risk SoC target to experiment on.
+  * Residual security note (by design, matches the requested posture): the
+    added service is an UNAUTHENTICATED root shell on TCP 1023, reachable by
+    anyone on the device's network. This mirrors "adbd + ro.secure=0". The
+    stock image is already similarly open (telnet :23 + empty root password).
+  * NOT flashed to hardware (per instructions). Round-trip proven in software
+    only.
+
+-------------------------------------------------------------------------------
+UNDO
+-------------------------------------------------------------------------------
+  * To revert to stock: reflash the pristine SOURCE install.img
+    (SHA256 20de0ab4...), or a GOLD rescue image.
+  * To revert just this change inside a rootfs image: delete
+    /etc/init.d/S98adbroot and recompute the MD5 trailer (re-splice). The
+    pre-existing levers (empty root password, telnet :23, serial getty) are
+    stock and were not altered.
+  * Rebuild command:
+      python3 -I <scratch>/scripts/build_install_img.py \
+        "<SOURCE install.img>" <modified rootfs.ext4.bin> dist/actiontec/install.img
+===============================================================================

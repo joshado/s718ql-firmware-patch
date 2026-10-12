@@ -250,6 +250,21 @@ dead in standby, one of these is true, in rough order of likelihood:
 4. Meter the rails gated by P1_5 / P1_7 / P1_9 / P1_25 in standby vs on, and
    find which one feeds the AM8250 and the PHY. This settles case 4.
 
+### Resolved without an MCU patch (2026-10-12) **[hw]**
+
+The current firmware has a configuration option that keeps the network side
+powered in standby. With it on, the projector does not answer PJLink/web/SSH
+while suspended, but it **does wake on a Wake-on-LAN magic packet** — i.e. the
+"WoL standby" row of the table above. That is enough for Home Assistant
+(`ha/custom_components/dell_s718ql`), so the patches below were **not** applied
+and no MCU image was flashed. A patched image was built and then discarded.
+
+Checked in the code while preparing it **[C]**: a normal shutdown is
+`power_off(0)`, and `gpio_init_table(0)` does not re-run the pin table, so the
+standby rail pins are left as they were; only `power_off(1)` (boot) and
+`power_off(2)` (fault) re-initialise every pin. The NXP never writes the
+standby-mode byte; it only reads it.
+
 ### Patch points, if experiments say the MCU is the blocker
 
 All are 4-byte edits in the app region; none touches the BootCode.
@@ -257,7 +272,7 @@ All are 4-byte edits in the app region; none touches the BootCode.
 | Goal | Address | Original | Patch | Effect |
 |---|---|---|---|---|
 | Never use eco standby | `0x71a4` (`keep_rails`) | `08 b5 68 46` | `01 20 70 47` (`movs r0,#1; bx lr`) | standby rail group stays up and USART1 stays alive whatever setting 3 says. Three callers: `0x7068`, `0x7444`, `0x7572`. |
-| Never let the MCU take the PHY | `0x7214` (`wol_enabled`) | `08 b5 68 46` | `00 20 70 47` (`movs r0,#0; bx lr`) | disables the WoL takeover so the AM8250 keeps its PHY; also makes `#00501 1` report 0 and removes wake reason 7. |
+| Never let the MCU take the PHY | `0x7214` (`wol_enabled`) | `08 b5 68 46` | `00 20 70 47` (`movs r0,#0; bx lr`) | disables the WoL takeover so the AM8250 keeps its PHY and removes wake reason 7. `#00501 1` still reports the stored flag (it reads the setting directly, not through this function). |
 | Keep a main-side rail in standby | the `gpio_wr(pin, 0)` call in `0x7370` / `0x6960` for that pin | `bl 0x48ba` | `nop; nop` (`c0 46 c0 46`) | only once step 4 above has identified the pin; mind the matching sequencing in `0x8564`. |
 
 With the first two patches the intended behaviour is: AM8250 and PHY stay
@@ -315,6 +330,26 @@ cannot erase sectors 0–1. The update UART is 19200 baud (`0x157e`).
 text is the three `#0050x` commands and the BootCode's `Update` / `Reset` /
 `BootCode` lines. There is no serial console to tap; visibility comes from SWD
 or from code we add.
+
+### Re-checked against the disassembly (2026-10-12) [C]
+
+Before the first flash the claims above were re-read from the BootCode's code
+(`tools/nxp_disasm.py … 0`), not from these notes:
+
+- All five IAP "prepare" calls (`0x772`, `0x782`, `0xe34`, `0x1052`, `0x10e4`)
+  pass sectors `(2, 0x18)`; both erase calls (`0x77a`, `0xe40`) likewise. The
+  ROM refuses to erase or program a sector that was not prepared, so sectors
+  0–1 (the BootCode) cannot be modified by any path in the BootCode.
+- The download loop's write pointer starts at `0x2000` (`0x478`), is reset
+  only to `0x2000` (`0x7b0`), and only ever increases by 1024.
+- `boot_main` reads the key combo (`0x502` → `0x376`) **before** the jump to
+  the app (`0x522`), so entering download mode does not depend on the app.
+- Correction to "waits for an update": with the app area erased and no key
+  held, the BootCode falls through to the jump, finds the reset vector out of
+  range and blinks P2_9 forever. Recovery is the same key-held power-up.
+
+The one assumption that cannot be checked from here: that the BootCode in the
+unit is the one in Dell's `.hex`.
 
 ## Serial download protocol
 

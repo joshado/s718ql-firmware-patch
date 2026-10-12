@@ -1,0 +1,245 @@
+===============================================================================
+ Dell S718QL - Network FW (Actions Micro AM8250) - ROOTED + SSH IMAGE MANIFEST
+===============================================================================
+Build date : 2026-10-11
+Builder    : tools/act_repack.py  (round-trip proven byte-identical first)
+Host       : macOS (arm64) + Docker (colima). Cross-build + ext2 edit in Docker.
+Status     : BUILT + VERIFIED on the bench. NOT FLASHED to hardware.
+
+This image gives the owner TWO root paths on their own device:
+  1. Passwordless root on the SERIAL console (inittab ::askfirst:-/bin/sh), and
+  2. Authenticated root over SSH on port 22 (dropbear), NEW in this build.
+
+!!! ROOT SSH PASSWORD (CHANGE THIS ON FIRST LOGIN) !!!
+    user     : root
+    password : projector
+    This is a DEFAULT shipped so password SSH works out of the box. It is
+    documented publicly here; treat the device as open until you change it:
+      passwd root        (on the device; note the rootfs may be read-only -
+                          see "read-only rootfs" below before relying on this)
+    or rebuild the image with your own hash (see HOW TO REBUILD, step 1).
+
+-------------------------------------------------------------------------------
+ ARTIFACTS
+-------------------------------------------------------------------------------
+Source (pristine vendor image, immutable):
+  firmware/extracted/Dell-s718ql-projector-firmware-m0r005-2018-11-30/Network FW/ACTUPGRADE.bin
+  SHA-256 : 2cf3908115d8e5e3b3670e4b63720b0e772d6f8f6d82d9d2e1e57b72656a0659
+  size    : 269646848 bytes (0x10127c00)
+
+Output (this build):
+  dist/network/ACTUPGRADE.bin
+  SHA-256 : d572c10a86711ab02841877da9de7475e8005a908ca070860312d63e1539cac3
+  size    : 269646848 bytes (0x10127c00)   (identical size to source)
+
+  (Supersedes the earlier serial-only build d79798f2...; that one only blanked
+   the root password and added no network daemon.)
+
+-------------------------------------------------------------------------------
+ DROPBEAR SSH SERVER (the new piece)
+-------------------------------------------------------------------------------
+Upstream : dropbear 2022.83  (https://matt.ucc.asn.au/dropbear/)
+Tarball  : dropbear-2022.83.tar.bz2
+           SHA-256 bc5a121ffbc94b5171ad5ebe01be42746d50aa797c9549a4639894a16749443b
+           (matches the official release)
+
+Why dropbear and why static musl:
+  The shipped busybox v1.15.1 has NO telnetd/dropbear/inetd/nc, so a network
+  shell requires injecting a binary. dropbear is a standard AUTHENTICATED SSH
+  server (ships on virtually every OpenWrt router) - not a raw bind shell.
+  It is built STATIC against musl (not glibc): static glibc breaks getpwnam/NSS
+  so dropbear could not look users up; musl reads /etc/passwd + /etc/shadow
+  directly and works fully static.
+
+Toolchain:
+  Docker image muslcc/x86_64:mipsel-linux-musl
+    digest sha256:be6c4b9c22e92efb95b7d1262f9a7455e7f2eb07381207ae7a5ce3150d775d97
+    (Alpine 3.14.3; gcc 11.2.1 + binutils; target triple mipsel-linux-musl)
+  + GNU make 4.3 (apk add make).
+  NOTE host-arch quirk: the muslcc toolchain host binaries are i386 (32-bit x86),
+  while the Alpine userland is x86_64. On an arm64 Mac they run under qemu via
+  binfmt; register the i386 handler first with:
+     docker run --privileged --rm tonistiigi/binfmt --install 386,amd64
+  Colima shares $HOME but NOT /private/tmp, so the build used `docker cp` to move
+  source in / binary out rather than a volume mount.
+
+Build:
+  ./configure --host=mipsel-linux-musl CC=gcc AR=ar RANLIB=ranlib STRIP=strip \
+      --disable-zlib --disable-harden \
+      CFLAGS="-Os -fno-pie -ffunction-sections -fdata-sections" \
+      LDFLAGS="-no-pie -Wl,--gc-sections"
+  make PROGRAMS="dropbear dropbearkey scp" MULTI=1 STATIC=1
+  strip dropbearmulti
+  - --disable-harden + -no-pie force a classic ET_EXEC static binary. (Default
+    build produced a static-PIE ET_DYN because the musl gcc defaults to -pie;
+    a static-PIE is risky to load on the ancient 2.6.27 kernel, so we force
+    non-PIE - the battle-tested static format.)
+
+Result binary (dropbearmulti):
+  file    : ELF 32-bit LSB executable, MIPS, MIPS-I version 1 (SYSV),
+            statically linked, stripped   (o32 ABI, little-endian, ET_EXEC)
+  size    : 441336 bytes
+  SHA-256 : 07234460af2c78d724d0d325408e325457e2b7919caaa5511039875633f35046
+
+Smoke test (qemu-mipsel user-mode, in a Debian container w/ qemu-user-static):
+  - `dropbearmulti dropbear -h`    -> prints "Dropbear server v2022.83" + usage
+  - `dropbearmulti dropbearkey`    -> prints usage
+  - RSA 2048 + ECDSA 256 host-key GENERATION succeeds (exercises the bundled
+    libtomcrypt/libtommath crypto under emulation).
+  This validates the binary format/ABI. It CANNOT prove 2.6.27 kernel-syscall
+  compatibility (no 2.6.27 kernel to run it against) - see RESIDUAL RISKS.
+
+-------------------------------------------------------------------------------
+ FILES ADDED / CHANGED INSIDE THE rootfs (ext2, 1 KiB blocks)
+-------------------------------------------------------------------------------
+Edited on a fresh work copy of the pristine rootfs partition with `debugfs -w`,
+image size kept EXACTLY 244318208 (0xe900000), then e2fsck -fn clean.
+
+ADDED:
+  /usr/sbin/dropbearmulti                 mode 0755 root:root  (441336 B)
+  /usr/sbin/dropbear       -> dropbearmulti   (symlink, convenience)
+  /usr/sbin/dropbearkey    -> dropbearmulti   (symlink, convenience)
+  /etc/dropbear/                          mode 0755 root:root  (new dir)
+  /etc/dropbear/dropbear_rsa_host_key     mode 0600 root:root  (805 B, pre-gen)
+  /etc/dropbear/dropbear_ecdsa_host_key   mode 0600 root:root  (141 B, pre-gen)
+      Host keys are PRE-GENERATED at build time (with dropbearkey under qemu)
+      because the rootfs is read-only at runtime - do NOT rely on first-boot
+      key generation to a read-only fs. dropbear reads them read-only via -r.
+
+CHANGED:
+  /etc/shadow   root password set to a KNOWN value (dropbear rejects empty
+      passwords, so the old blanked password could not log in over SSH):
+        before (pristine): root:$1$qsNdVNb0$U5HuLrYhZ6vbslIiyaQlA1:14610:0:99999:7:::
+        after  (this build): root:$1$Dr0pbeaR$ERYryh2CGjn3/fIhJv6oU/:14610:0:99999:7:::
+      md5crypt ($1$), matching the vendor hash style. Plaintext = "projector".
+      inode/mode/uid/gid preserved (0775, uid 1023, gid 1023 - vendor quirk).
+
+  /etc/init.d/rcS   appended a non-fatal, backgrounded launch block (exact
+      original 2354 bytes preserved verbatim; block appended at end, after the
+      network drivers am7x_net.ko are insmod'd earlier in the script):
+        if [ -x /usr/sbin/dropbearmulti ]; then
+            /usr/sbin/dropbearmulti dropbear -p 22 -P /tmp/dropbear.pid \
+                -r /etc/dropbear/dropbear_rsa_host_key \
+                -r /etc/dropbear/dropbear_ecdsa_host_key &
+        fi
+      - port 22; pidfile to /tmp (tmpfs, writable) so a read-only / is fine;
+      - `-r` reads the pre-generated host keys read-only;
+      - guarded by `[ -x ]` and backgrounded: if the binary is missing or
+        dropbear exits, boot is unaffected (rcS has no `set -e`).
+
+SERIAL root is UNCHANGED and still passwordless: inittab has
+`::askfirst:-/bin/sh`, which execs /bin/sh directly (no login prompt), so it
+does not consult /etc/shadow. getty is commented out. Setting the shadow
+password therefore enables SSH password auth WITHOUT affecting serial root.
+
+Nothing else in the filesystem was modified.
+
+-------------------------------------------------------------------------------
+ CONTAINER INTEGRITY (the only image-wide check)
+-------------------------------------------------------------------------------
+"ActionsFirmware" container, UpdateVer v1.27. Single integrity field = CHECKSUM
+record at file offset 0x20 (0x30 hdr_len=0x40, 0x34 body_len=0x10127bc0,
+0x3c checksum). Algorithm: 32-bit ADDITIVE SUM of the little-endian u32 words
+over [0x40 : EOF], mod 2^32 (the 4-byte field at 0x3c is not covered by itself).
+
+  original checksum : 0x30cf215e   (matches stored - round-trip proof)
+  this build        : 0x758b06fb   (recomputed; VERIFY: OK)
+
+ROUND-TRIP PROOF (golden rule): act_repack.py re-packing the pristine image with
+NO changes reproduces it byte-for-byte (SHA-256 2cf39081...) and the recomputed
+sum equals the stored 0x30cf215e.
+
+-------------------------------------------------------------------------------
+ VERIFICATION OF THIS BUILD
+-------------------------------------------------------------------------------
+* Output SAME SIZE as source: 269646848 bytes.  (OK)
+* Additive sum self-consistent: stored==computed==0x758b06fb, VERIFY: OK.
+* CONFINED DIFF vs pristine source: 329542 bytes differ, in 69599 ranges, ALL
+  inside the rootfs region [0xa1ba00 : 0xf31ba00) plus the 4-byte sum field
+  [0x3c:0x40). ZERO bytes differ anywhere else - FIRM, user1, bak, vram and all
+  boot/loader records are byte-identical to the source.  (OK)
+* Re-opened the BUILT image: carved the rootfs region back out of
+  dist/network/ACTUPGRADE.bin; its SHA-256 equals the injected work copy;
+  e2fsck -fn CLEAN; /etc/shadow, /usr/sbin/dropbearmulti (+symlinks),
+  /etc/dropbear/* host keys and the rcS launch line all confirmed present.  (OK)
+
+-------------------------------------------------------------------------------
+ HOW TO REBUILD
+-------------------------------------------------------------------------------
+A) Build dropbearmulti (static musl mipsel, non-PIE):
+   docker run --privileged --rm tonistiigi/binfmt --install 386,amd64   # once
+   # in muslcc/x86_64:mipsel-linux-musl (+ `apk add make`), source copied in:
+   ./configure --host=mipsel-linux-musl CC=gcc --disable-zlib --disable-harden \
+       CFLAGS="-Os -fno-pie -ffunction-sections -fdata-sections" \
+       LDFLAGS="-no-pie -Wl,--gc-sections"
+   make PROGRAMS="dropbear dropbearkey scp" MULTI=1 STATIC=1 && strip dropbearmulti
+   # host keys, under qemu-mipsel:
+   qemu-mipsel-static dropbearmulti dropbearkey -t rsa   -s 2048 -f dropbear_rsa_host_key
+   qemu-mipsel-static dropbearmulti dropbearkey -t ecdsa -s 256  -f dropbear_ecdsa_host_key
+
+B) Pick the root password hash (change "projector"):
+   openssl passwd -1 <yourpassword>      # md5crypt $1$...
+   printf 'root:<HASH>:14610:0:99999:7:::\n' > overlay/shadow.ssh.new
+
+C) Inject into a fresh rootfs work copy (image size unchanged):
+   cp firmware/unpacked/network/part_rootfs.bin firmware/unpacked/network/part_rootfs_ssh.bin
+   # debugfs -w script (see overlay/ for inputs):
+   #   rm/write /etc/shadow (+ sif mode 0100775 uid 1023 gid 1023)
+   #   rm/write /etc/init.d/rcS (+ sif mode 0100775 uid 1023 gid 1023)
+   #   write /usr/sbin/dropbearmulti (+ sif 0100755 uid 0 gid 0)
+   #   mkdir /etc/dropbear; write the two host keys (0100600 uid 0 gid 0)
+   #   symlink /usr/sbin/dropbear dropbearmulti; symlink /usr/sbin/dropbearkey dropbearmulti
+   e2fsck -fn firmware/unpacked/network/part_rootfs_ssh.bin
+
+D) Repack + verify:
+   python3 -I tools/act_repack.py \
+     "firmware/extracted/.../Network FW/ACTUPGRADE.bin" \
+     dist/network/ACTUPGRADE.bin \
+     --replace rootfs=firmware/unpacked/network/part_rootfs_ssh.bin
+   python3 -I tools/act_repack.py --verify dist/network/ACTUPGRADE.bin
+
+Staged inputs: the version-controlled ones are in overlays/network/
+(rcS.ssh.new, tcpsh.c). The regenerated-locally ones are NOT committed and live
+under firmware/unpacked/network/overlay/ (dropbearmulti — rebuild per step A
+above; dropbear/dropbear_*_host_key — PRIVATE keys, generate your own with
+dropbearkey; shadow.ssh.new — `openssl passwd -1 <pw>` per step B).
+
+-------------------------------------------------------------------------------
+ HOW TO UNDO
+-------------------------------------------------------------------------------
+* To discard this build: the pristine vendor image is untouched at the Source
+  path (SHA-256 2cf39081...). Flashing it restores stock.
+* To remove only SSH in a rebuild: delete /usr/sbin/dropbearmulti + symlinks and
+  /etc/dropbear/, revert /etc/init.d/rcS to its 2354-byte original, and (if
+  wanted) blank /etc/shadow again; repack.
+
+-------------------------------------------------------------------------------
+ RESIDUAL RISKS (read before flashing)
+-------------------------------------------------------------------------------
+1. KERNEL 2.6.27 vs MUSL (the main unknown). The device kernel is 2.6.27.29
+   (from /lib/modules/2.6.27.29/). musl from the 2021 muslcc toolchain targets
+   old kernels and dropbear uses only classic syscalls (socket/bind/listen/
+   accept - NOT accept4; it reads /dev/urandom directly, not getrandom), and the
+   binary is fully static (no ld.so), so it is LIKELY fine. But it was only
+   smoke-tested under qemy-mipsel user-mode, NOT against a real 2.6.27 kernel, so
+   a musl syscall that assumes a newer kernel could in principle fail. UNTESTED
+   on hardware. Mitigation if it mis-runs: rcS backgrounds it and continues, so
+   boot is unaffected; serial root still works to recover.
+2. /dev/urandom must exist at runtime. rcS runs `mdev -s`, which creates the
+   standard device nodes incl. urandom, so this should hold. If it is somehow
+   absent, dropbear key-exchange/keygen would fail.
+3. DEFAULT PASSWORD. root/"projector" is published here. The device is OPEN to
+   anyone on the network who reads this manifest until you change it.
+4. READ-ONLY ROOTFS. If / is mounted read-only at runtime (inittab remounts ro
+   on shutdown; the cmdline may mount ro), `passwd` on the device won't persist -
+   change the password by rebuilding the image instead. Host keys + pidfile are
+   already handled for a read-only / (pre-generated keys; pidfile in /tmp).
+5. OTA / SIGNATURE (unchanged from the rooting pass). Static analysis found the
+   Linux update path (am7x_ota_upgrade.ko/am7x_upgrade.ko, fui.app) gates only on
+   the additive container sum (reproduced) + zlib crc32 on the COMPRESSED FIRM
+   blob and an MBREC checksum - and FIRM/MBREC are byte-identical here. No rsa/
+   ecdsa/sha/hmac/cert image signature was found. CAVEAT: Dell's production flash
+   is the USB/ADFU boot-ROM path (ADECadfus/ADFUadfus); that ROM protocol was not
+   reverse-engineered, so whether it adds its own check is unconfirmed. NOT
+   FLASHED - treat all of the above as bench evidence, not a guarantee.
+===============================================================================

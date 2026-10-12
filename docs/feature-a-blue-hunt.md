@@ -1,5 +1,20 @@
 # Feature (a) — hunting the STABLE no-signal blue
 
+> **SUPERSEDED (2026-10-12).** Feature a is solved; see
+> [feature-a-osd-model.md](feature-a-osd-model.md). This file is an earlier
+> analysis kept for history. What it got right: `FUN_ram_001ac05b` is the gate
+> between "video" and "colour" for a display window. What it got wrong:
+> - the colour shown when the gate is clear is the per-window **3-3-2 byte**,
+>   not `0x90102f33`; `0x90102f33` is the frame colour, visible only where no
+>   window covers the panel;
+> - the steady blue is not "a layer below the windows" — it is the windows
+>   showing **video** with no input;
+> - `0x101d20` is OSD window 1, not a scaler channel, so the "channel mute"
+>   risk was not real;
+> - its "next experiment" (v7) was flashed and did not work — the cave ran once
+>   and the firmware switched the windows back to video afterwards. The fix was
+>   to hook the gate itself.
+
 Dedicated trace to find the surface that holds the **stable blue** behind the
 "No … signal" screen, after two hardware disproofs (see
 [feature-targets.md](feature-targets.md) §(a) for the history). Written

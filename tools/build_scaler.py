@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Build the patched scaler MERGE.bin from git-tracked patch definitions.
 
-Applies feature a (no-signal background -> red): a code-cave hook at
-osd_nosig_draw (0x1dbc84) that writes the free-run colour register. The assembled
-bytes come from tools/aeon-ghidra/patches/feature-a-nosig-red.asm.txt (produced by
-AeonAssemble.java from the .lst; re-run that only if the .lst changes).
+Applies an assembled AEON patch listing (code caves in the AP-prefix padding plus
+one or more hook sites in the AP stream) and size-neutral data patches to stock
+MERGE.bin. The asm bytes come from tools/aeon-ghidra/patches/<name>.asm.txt
+(produced by AeonAssemble.java from the .lst; re-run that only if the .lst
+changes). Current release = feature-a-v11-allbg-black.asm.txt with
+feature-b-unplug.txt and feature-a-v11-black-data.txt, NOSTAMP=1 -- see
+docs/rebuilding.md section 1.
 
-Safety: asserts the hook-site original bytes and that the cave is empty before
-patching; the repacker recomputes all CRCs and fixes up TEL offsets.
+Safety: asserts that each hook site's overwritten bytes are re-executed from the
+cave and that the cave is empty before patching; the repacker recomputes all CRCs
+and fixes up TEL offsets.
 
   build_scaler.py <orig MERGE.bin> <asm.txt> <out MERGE.bin> [data_patch.txt ...]
 
@@ -28,6 +32,8 @@ BASE, DEC = 0x180000, 0x183800
 # input" lives (glyph-encoded) in the AP. We overwrite the 12 glyphs "switch
 # input" (@0x2f05be) with "v<7-hex-hash>" (1 + 7 + 4 spaces = 12), size-neutral,
 # so the screen we test on shows exactly which commit produced the flashed image.
+# DIAGNOSTIC ONLY: it corrupts the neighbouring on-screen text. Set NOSTAMP=1 for
+# release builds.
 # OSD glyph encoding: ' '=0x01, 0-9=0x0c..0x15, a-z=0x34..0x4d (so hex a-f=0x34..0x39).
 STAMP_ADDR = 0x2f05be
 STAMP_EXPECT = bytes.fromhex("464a3c47363b013c41434847")  # s w i t c h _ i n p u t  (12 B)
@@ -96,10 +102,17 @@ def build(orig, asm, data_patches=()):
     # re-executed from the cave (the displaced prologue), else the hooked function
     # loses its prologue. Works for any hook without hardcoding its address.
     cave_bytes = b"".join(b for _, b in cave)
-    if hook:
-        hlo = hook[0][0]; hbytes = b"".join(b for _, b in hook)
+    # Group the hook entries into contiguous runs so several hook sites can be
+    # patched in one build; each run is checked independently.
+    runs = []
+    for a, b in hook:
+        if runs and runs[-1][0] + len(runs[-1][1]) == a:
+            runs[-1][1] += b
+        else:
+            runs.append([a, bytearray(b)])
+    for hlo, hbytes in runs:
         orig_hook = bytes(ap[hlo - DEC:hlo - DEC + len(hbytes)])
-        assert orig_hook in cave_bytes, "hook: overwritten original bytes not re-executed from cave"
+        assert orig_hook in cave_bytes, f"hook @ {hlo:#x}: overwritten original bytes not re-executed from cave"
     lo = min(a for a, _ in cave); hi = max(a + len(b) for a, b in cave)
     assert all(x == 0 for x in prefix[lo - BASE:hi - BASE]), "cave region not empty"
     for addr, b in asm:

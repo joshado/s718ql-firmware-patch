@@ -67,6 +67,9 @@ description: Force no-signal background colour (see feature-targets.md a)
 enabled: true
 ops:
   # placeholder — exact op (byte vs inject) pending the renderer trace
+  # NOTE: illustrative schema only. The real feature-a patch is two code hooks
+  # plus data edits; see tools/aeon-ghidra/patches/feature-a-v11-* and
+  # feature-a-osd-model.md.
   - type: asm
     at: osd_no_input_handler+0x?? 
     expect_asm: "..."
@@ -78,14 +81,15 @@ ops:
 Each is `unpack → apply patches → repack → verify`, reusing rebuilding.md:
 
 - **Scaler (`MERGE.bin`)** — **WRITTEN.** `tools/mst9u_merge.py` (repack +
-  round-trip) and `tools/build_scaler.py` (apply asm cave + size-neutral data
-  patches + auto git-hash **version stamp**, with `expect` guards and a container
-  self-check). Flow: unpack → inflate AP → apply byte/asm/string ops →
+  round-trip) and `tools/build_scaler.py` (apply asm caves at one or more hook
+  sites + size-neutral data patches, with `expect` guards and a container
+  self-check; optional diagnostic **version stamp**, off for release builds via
+  `NOSTAMP=1`). Flow: unpack → inflate AP → apply byte/asm/string ops →
   re-DEFLATE raw (`zlib -15`, lvl 9) → fix CRC-16 + header CRC-32 (incl. the
   solved `0x1b41bbca`) + trailer CRC-32 + `ap_flash_end`/`ap_ram_end`/`filesize`
   + TEL offset fixup. Proven on hardware (see rebuilding.md §1).
 - **Network (AM8250, `ACTUPGRADE.bin`)** — `act_unpack.py` → edit ext2 rootfs →
-  splice → recompute additive sum (`act_repack.py`, to write). Cleanest target.
+  splice → recompute additive sum (`act_repack.py`, written). Cleanest target.
 - **Actiontec (RTD1295, `install.img`)** — untar → edit `rootfs.ext4.bin` via
   loopback/`debugfs` → re-tar in original order. Needs a working ext4 opener.
 - **NXP (`.hex`)** — byte-patch app region only (keep `0x0–0x2000` and the
@@ -144,17 +148,16 @@ inputs.lock
 1. **Scaffolding + round-trip harness** for the scaler (fully-solved container)
    and AM8250 (easiest). Prove no-op repack is byte-identical. No patches yet.
 2. **Patch engine v1**: `byte` + `string` ops, symbol resolver, `expect` guards,
-   diff report. Land feature **b** (`unplg`→`unplug`) and feature **a** (colour)
-   as first real patches — the colour op shape (`byte` data edit vs `asm`/`inject`
-   code patch) is chosen once the no-signal renderer location is confirmed.
+   diff report. Features **a** and **b** have already landed through
+   `build_scaler.py` directly (a = `asm` hooks + data edits, b = data edit); port
+   them into the engine as its first patches.
 3. **`asm`/`inject`** ops (AEON hook) + the NXP app-patch/hook path.
 4. **`fs-overlay`** (rooting) for RTD1295 / AM8250.
 5. **CI** wiring + manifest/report gates.
 
 ## Open dependencies
 
-- Feature **a**'s exact patch (data edit vs code hook, and where) depends on the
-  in-progress no-signal-renderer trace — the engine supports both shapes, so the
-  pipeline isn't blocked, only that one patch file is.
+- ~~Feature **a**'s exact patch~~ — resolved: two code hooks + data edits
+  (feature-a-osd-model.md §4).
 - Scaler and AM8250 repackers still need writing + a round-trip proof before any
   real build is trustworthy.

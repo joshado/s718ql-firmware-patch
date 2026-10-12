@@ -77,10 +77,11 @@ reference a string (21,155 pointer constructions); Ghidra's current analysis
 **~48**. Porting that fold into a Ghidra pass that *creates references + defines
 strings + labels* (before `NameFromStrings`) would raise auto-naming ~7.5x and
 make the whole dump far more readable. This is the highest-leverage tooling
-improvement. (It does **not** by itself crack the no-signal trace: there the
-constant is already resolved — see the `0x2a9974` puzzle in
-firmware-components.md — the block is data-structure interpretation + sweep
-boundary quality.)
+improvement. Separate gap, found during feature a: the flow disassembler does
+not reach code that is only referenced from **data pointers** (menu item
+callbacks, icon getter stubs), and the decompiler inlines shared tail code into
+every caller. Check raw bytes before concluding something is unreferenced, and
+patch the real function, not an inlined copy (feature-a-osd-model.md).
 
 **Why not more — the AEON reference gap.** Ghidra ships no constant-reference
 analyzer for AEON, and `SymbolicPropogator` does not recover the `b.movhi`+

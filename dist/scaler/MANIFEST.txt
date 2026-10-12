@@ -1,0 +1,7 @@
+dist/scaler/MERGE.bin -- RELEASE: feature a v11 (no-signal + searching screens black, logo hidden) + feature b, 2026-10-12
+  src  sha256 0e752afa54400c0a599dfd9c1638ac4a8aff93ac5210f2b9204c5285bb5a94e9
+  out  sha256 918612e2f5bb058adf54a758e9650b201f0f124f86bb8f370cf4c1687b89135b
+No version stamp (NOSTAMP=1) -- on-screen text is stock apart from "NEVER unplug".
+Patches: feature-a-v11-allbg-black (.lst/.asm.txt), feature-a-v11-black-data.txt, feature-b-unplug.txt.
+Build command: docs/rebuilding.md section 1. What it does: docs/feature-a-osd-model.md section 4.
+Recovery: re-flash stock MERGE.bin the same way; sboot + pm_8051 are byte-identical.

@@ -6,8 +6,8 @@ disassembly needed, "code edit" = needs the target's ISA.
 
 | # | Goal | Lives in | Type | Difficulty |
 |---|---|---|---|---|
-| a | Change no-input-source background colour | Scaler (MST9U) | locate (code trace) + data/code edit | medium–high |
-| b | Fix `unplg`→`unplug` shutdown typo | Scaler string table | data edit | low–medium |
+| a | Change no-input-source background colour | Scaler (MST9U) | code hooks + data edits | **done** |
+| b | Fix `unplg`→`unplug` shutdown typo | Scaler string table | data edit | **done** |
 | c | Root on the two Linux images | AM8250 + RTD1295 | fs edit + repack | **low** |
 | d | Remote power-on for Home Assistant | NXP MCU + AM8250 | code/daemon | high |
 | e | HDMI-CEC working | Scaler (CEC) + others | code edit | high |
@@ -16,203 +16,49 @@ disassembly needed, "code edit" = needs the target's ISA.
 
 ---
 
-## (b) The `unplg` typo — most tractable; start here
+## (b) The `unplg` typo — DONE (hardware-confirmed)
 
-> **Correction:** the text is not ciphered. It is stored as OSD font glyph
-> indices (`A`–`Z` = `0x1A`–`0x33`, `a`–`z` = `0x34`–`0x4D`, space = `0x01`,
-> terminator = `0x00`); see firmware-components.md, "Menu text encoding". The
-> "+45 shift" below is just the lowercase range of that map. The word is at
-> `0x16C65F` in `ap_decompressed.bin` and there is no slack byte after it.
-
-**Confirmed located.** The OSD/message strings in the scaler AP are stored with
-a per-block **additive character cipher** (not ASCII). The main multilingual
-message block decodes with a **+45** shift. At `ap_decompressed.bin` offset
-`~0x16c65f` the decoded text reads:
-
-> *"...please DO NOT **unplg** the power cord while the projector fan is still
-> running..."*
-
-So the fix is: locate the ciphered bytes for `unplg`, and insert the missing
-`u`. `unplug` is one character longer than `unplg`, so this is **not** a pure
-in-place byte swap:
-- **If** there's a null/separator with slack after the word, we shift the
-  following byte and re-encipher — a clean data edit.
-- **If not**, we rebuild that string's region (and any length/offset table that
-  points at it — TBD whether the TEL table or an OSD index references string
-  offsets).
-
-Then re-DEFLATE + recompute CRCs (see [rebuilding.md](rebuilding.md) §1).
-`tools/` needs a small `mst9u_strcipher.py` to encode/decode a given shift and a
-locator for the string table — next concrete task.
-
-**Note:** because the strings are length-sensitive, verify whether the renderer
-uses explicit lengths or null-termination before editing. The decoded dump
-shows null separators between messages, which is promising.
+The cooling warning read *"…please DO NOT **unplg** the power cord…"*. OSD text
+is stored as font glyph indices, not ASCII and not ciphered (`A`–`Z` =
+`0x1A`–`0x33`, `a`–`z` = `0x34`–`0x4D`, space = `0x01`, terminator = `0x00`;
+see firmware-components.md, "Menu text encoding"). There is no slack byte after
+the word, so instead of growing the string it is reworded in place:
+`"DO NOT unplg"` → `"NEVER unplug"` (both 12 glyphs) at RAM `0x2efe58`.
+Patch: `tools/aeon-ghidra/patches/feature-b-unplug.txt`, folded into every
+scaler build.
 
 ---
 
-## (a) No-input-source background colour
+## (a) No-input-source background colour — DONE (hardware-confirmed 2026-10-12)
 
-**Status (2026-10-12): renderer found and hooked, cave execution proven, but the
-blue-fill surface is STILL OPEN after two hardware disproofs.** The no-signal
-screen is a two-layer composite (logo/text OSD over a blue field); the mode-4
-renderer `osd_nosig_draw` (`0x1dbc84`) is located and our AEON code-cave hook
-provably runs (feature b and the logo/text still render through it). **But** the
-two most likely sources of the blue — the free-run frame reg `0x90102f33` (v1)
-and the group-0 per-window background via `osd_set_bg_color_332` (v2) — were
-**both flashed and both left the screen blue.** See the HARDWARE RESULTS block
-further down. The sections below are the original code-trace; read them for
-evidence, but note the "blue = `0x90102f33` default" conclusion is now wrong.
-*A separate flash-delivery issue currently blocks confirming new builds — see
-rebuilding.md §1.*
+The searching and no-signal screens are now plain black, with the Dell logo
+hidden and the no-signal text kept. Details:
+[feature-a-osd-model.md](feature-a-osd-model.md) (how the screens are composed,
+the patch table, side effects) and [feature-a-status.md](feature-a-status.md)
+(summary + attempt log).
 
-*Established (original string/code trace — see hardware caveats above):*
-- The Dell logo is a 2-tone JPEG (82% white bg, 18% Dell blue ~RGB 20,135,199)
-  stored as TEL resource type `0xc5` at `MERGE.bin 0xb9d08`, size `0x5110`. Its
-  resource record holds only type/offset/size — **no colour or palette data**.
-- On screen the logo is white on a blue field (user-reported) — a figure-ground
-  + colour swap that **no per-pixel RGB op reproduces** (negate→orange-on-black,
-  R/B swap→orange-on-white).
-- Strings exist for a "Frame Color"/free-run background (`[msScalerAP] Enable
-  Frame Color`, `0x2aacf9`) and a logo/mute subsystem (`Mute BMP Logo!`
-  `0x2b013e`, `initScanLogoCapture`/`setLogoCapture`, `USER_PREF_SYS_DRAW_BMP_
-  LOGO`/`LOGOCAPTURE`/`LOGOASPECT`). The logo **preference** string is
-  referenced by `FUN_ram_001a93ce`; the colour-temp defaults
-  (`DefCool_RedColor` …) are referenced by several PQ functions (picture gains,
-  not the background).
+In brief:
+- The steady blue was the display windows showing **video** with no input, not a
+  colour register. Each window can instead show a per-window packed 3-3-2
+  "no-signal colour"; `win_set_show_video` (`0x1ac05b`) selects which. The fix
+  hooks that gate so the windows stay on the colour while `g_osd_mode` is 4 or
+  `0x0b`, and forces every colour write (`win_set_nosig_color_332`, `0x1c6fe9`)
+  to black.
+- `0x90102f33` is the **frame colour**, visible only where no window covers the
+  panel — the white surround of the searching screen. `osd_set_frame_color_rgb`
+  (`0x1c70ec`) is patched to always write black.
+- The no-signal Dell logo is **OSD text**: a 24×16 block of mono font glyphs
+  (icon at `0x2da22e`, colour `0xc2` = white on Dell blue from the OSD palette
+  at `0x2d2dc8`). Its colour bytes are patched to black-on-black. The
+  blue-on-white JPEG (`images/jpeg_0b9d08.jpg`, TEL id `0xc500`) is a separate
+  asset, used on the searching/splash screen.
 
-*Inferred, NOT verified in code:* that the logo is drawn as a mask/key with the
-background (blue) and foreground (white) as separate colour parameters. It is
-the only explanation consistent with the evidence above, but the actual drawing
-code has not been read.
-
-*Coverage pass done; renderer is string-less.* After exhaustive disassembly
-(`DisassembleCodeRegion.java`, 35%->full, 2,690 functions) the ref search does
-find `Mute BMP Logo!` — but in `FUN_ram_001c7c3d`, a **debug-dump routine**: a
-repeating `load state field -> DbgPrint(label, value)` (printer at `0x1c59a3`)
-that prints `Mute BMP Logo!`, logo and other state with labels. It is **not** the
-renderer. `Enable Frame Color` (`0x2aacf9`) is not constructed anywhere in the
-(now full) code — it is dead or reached via a pointer table. So the actual
-no-signal renderer / colour fill has **no debug string to anchor on**; string
-location cannot reach it.
-
-*Trace so far (via the OSD message path).* Decompiled the engine and wrappers:
-- `0x219504` is the glyph **renderer** (7 params; `param_2` = glyph string,
-  `param_3` = length). 8 call sites.
-- `0x1e9d6d` is a **show-by-id helper**: it copies an **ASCII** string through
-  `FUN_ram_001e9942` (ASCII→glyph transform) and renders it. 8 callers.
-- Wrappers `0x1e9de9` / `0x1e9f2d` / `0x1ea0c7` pick a message **id**
-  (`0xde`, `0xf5`/`0xd0`, `0xf0`/`0xc2`, `0xe8`) by input **source**
-  (`DAT_ram_0030f6d8`) and **state** (`DAT_ram_00307b98`), rendering ASCII
-  labels from the `0x2b28xx` region.
-
-*Where it's blocked.* Two walls, both from the analysis, not the chip:
-- Those source-select wrappers have **no static callers** (no `b.jal`/`b.j`, not
-  in any findable function-pointer table) — the no-signal screen is reached by
-  **indirect dispatch**, which static analysis can't resolve here. The
-  blind-sweep coverage also gives unreliable function boundaries, so the call
-  graph for indirect/table-driven paths is incomplete.
-- The pre-encoded no-signal **glyph** string (`0x2ecd94`) is **not referenced by
-  address** and its per-language table isn't statically locatable (computed at
-  runtime from base+language+screen-id).
-
-**NO-SIGNAL SCREEN FULLY RESOLVED — it is a TWO-LAYER COMPOSITE** (confirmed by
-four independent agents + spot-checks; the "Where it's blocked" indirect-dispatch
-wall noted above is now cleared — the mode-4 renderer is `osd_nosig_draw`
-`0x1dbc84`, reached via the OSD dispatch table `0x2d9200`, stride `0x1c`, slot
-`+0x14`).
-There is **no colour inversion** anywhere; the premise that the stored Dell JPEG
-is recoloured was a red herring. The screen is built from two separate hardware
-layers:
-
-- **Layer 1 — the BLUE background:** ⚠️ **DISPROVEN ON HARDWARE (see below).**
-  This was believed to be the scaler's **free-run frame generator** register
-  **`0x90102f33`** (RGB888: `f33`=R, `f34`=G, `f35`=B; 24-bit write via
-  `scaler_reg_write24`). But writing that register red (v1) left the screen blue,
-  and writing the full `osd_set_bg_color_332` sequence (v2) did too — so the
-  visible blue is driven by **some other surface, still unidentified.** The two
-  bullets below (Layer 2 / logo) remain correct.
-- **Layer 2 — the WHITE Dell logo + "No signal"/"Press Source" text:** the mode-4
-  **OSD overlay** (`g_osd_mode==0x04`), drawn by `osd_nosig_draw` (`0x1dbc84`):
-  it streams two **2-bits-per-pixel indexed** OSD-GRAM bitmaps via
-  `osd_gram_write_rle` (`0x21c925`, GRAM ports `0x101c66/67/68`, 12-bit RLE codes
-  = six 2-bit pixels each; expander `0x21c727`) and the text via
-  `osd_draw_current_screen_text` (`0x1e82ea`). **Index 0 = transparent** (the blue
-  Layer 1 shows through); **index 3 = foreground = white.** There is **no RGB
-  CLUT/palette** — the 4 index levels map to colour by a fixed OSD default, not a
-  per-screen table (the CLUT hypothesis was tested and disproven).
-
-So the **Dell logo on the no-signal screen is a monochrome OSD bitmap**
-(`osd_nosig_logo_bmp` = `DAT_ram_002a6c92`, file off `0x126c92`; a second icon
-`DAT_ram_002a74d8` at GRAM index `0xcf`), **NOT** the JPEG. The blue-on-white
-JPEG (`images/jpeg_0b9d08.jpg`, B_ID `0xc500`) is a *separate* asset for the
-**boot/menu splash** (mode 7, `FUN_ram_002027b0` → shown unmodified on a white
-free-run background). The two assets simply have opposite colour schemes — that
-is the whole of the "inversion."
-
-**Where the blue comes from — ⚠️ the theory below (boot DEFAULT of `0x90102f33`)
-was DISPROVEN on hardware (v1/v2 above); kept for the code-trace evidence, but
-the conclusion is wrong — the real surface is elsewhere and still unidentified.**
-Across the entire AP, every literal written to that register is `0xffffff` (white, the
-"searching"/ShowDiag path `osd_set_frame_color` `0x1ff83c`) or the burn-in cycle
-table (`g_nosig_bg_colors` `0x2cf6e4`, mode `0x0d` only); **no code ever writes
-blue.** The normal video→no-signal path (`osd_no_input_handler` `0x1e73fe` line
-~76487) sets mode 4 with **no colour write**, leaving the register at its boot
-default (≈ `0x00/0x00/0xFF`). The register address is built at runtime
-(`movhi 0x9010`/`ori 0x2f33`) and never appears as a word literal, so there is no
-(addr,value) init table for it in the AP — the default is set **outside** this
-image (HW reset default, or `sboot.bin`/`pm_8051.bin` init). *(The former claim
-"mode-4 never touches the register" was imprecise: one menu→no-signal branch,
-line 76483, does write WHITE `osd_set_bg_color_332(0,0xff)` — but only when
-signal is lost with a menu open, not the normal case.)*
-
-**To change the blue — three options, best first:**
-1. **Code patch (robust, universal — recommended).** Inject one colour write at
-   the top of `osd_nosig_draw` (`0x1dbc84`, file off `0x5dc84`), which runs on
-   every no-signal draw. **Use `osd_set_bg_color_332(0, <packed-3-3-2>)`**
-   (`0xe0`=red, `0x1c`=green, `0x03`=blue, `0x00`=black, `0xff`=white) — NOT a
-   bare `scaler_reg_write24(0x90102f33, …)`. Needs AEON code injection + repack
-   (both solved); implemented as the `0x182048` cave (feature-a-nosig-red.lst).
-
-   **HARDWARE STATUS (2026-10-12) — only ONE result exists; the colour fix is
-   NOT disproven, it is mostly UNTESTED. ⚠️ Only build v1 ever reached the flash;
-   every build after it (v2, v3-diag, the stamped build) did NOT apply (see the
-   delivery issue below), so they have NO hardware result.**
-   - **v1 — `scaler_reg_write24(0x90102f33, 0xff)` (bare poke): ACTUALLY FLASHED,
-     FAILED.** Applied (feature b `"NEVER unplug"` visible on screen; logo+text
-     render ⟹ the cave executes), but the no-signal background stayed blue. ⟹
-     **the visible blue is NOT register `0x90102f33` alone.** This one result
-     overturns the "Layer 1 = `0x90102f33` boot default" model below.
-   - **v2 — `osd_set_bg_color_332(0, 0xe0)` (red; the firmware's own bg routine
-     that also drives the per-window MMIO bg regs + `FUN_ram_001c63ce` latch):
-     BUILT + statically verified, but NEVER APPLIED → UNTESTED.** This remains the
-     leading candidate fix; do NOT treat it as failed.
-   - **v3-diag — cave draws the `?` icon at the logo GRAM slot (`0x20`) + NOPs
-     the real logo draw:** built to prove the cave *executes persistently*
-     (3-way: `?` icon = cave runs / blank = doesn't / Dell logo = old build).
-     NEVER APPLIED → UNTESTED.
-   - **Net:** the only firm conclusion is that bare `0x90102f33` isn't the visible
-     surface. `osd_set_bg_color_332` (v2) is still the most likely fix and must be
-     tested once flashing works again. If it also fails, prime suspects become a
-     *different* window index's bg, a scaler blank/mute colour block, or a
-     panel/TCON default — a serial read of the regs at no-signal would pin it.
-   - **BLOCKER — new builds aren't flashing (see rebuilding.md §1).** Since v1,
-     nothing has reached the projector: no auto-restart, and the no-signal line
-     still shows stock text. The git-hash **version stamp** (now auto-added by
-     `build_scaler.py`, overwriting the 12 glyphs `"switch input"` @`0x2f05be`
-     with `"v<hash>"`) exists precisely so that, once flashing works, we can tell
-     at a glance whether a given build actually landed.
-2. **Limited data edit (menu path only).** Change the `0xff` immediate in
-   `osd_set_bg_color_332(0,0xff)` at line 76483 to a packed-3-3-2 value — a pure
-   data edit, but only affects the "signal lost with menu open" case, so it is not
-   a complete fix on its own.
-3. **Patch the boot default (cleanest if found, not located).** The write that
-   makes the default blue is outside the AP — candidates: `sboot.bin`,
-   `pm_8051.bin`, or a HW reg-init list. Not yet found.
-
-*Verify empirically:* read `0x90102f33` over the serial/debug console at no-signal
-before and after any patch — this confirms the register is the surface (vs. a
-panel-side default) and catches the case where line 76483 already forced white.
+Earlier conclusions in this section's history that turned out wrong (kept here
+so nobody re-derives them): "the blue is the boot default of `0x90102f33`";
+"there is no palette/CLUT"; "the logo is a 2bpp bitmap, index 3 = white";
+"`0x2d9200` is a dispatch table and `0x1dbc84` the draw handler" (it is the menu
+page table and a LoadFont callback); "only v1 ever flashed" (the flash procedure
+was being done wrong at the time — rebuilding.md §1).
 
 ## (c) Root on the two Linux systems — genuinely easy
 
@@ -232,7 +78,7 @@ anything — we **add our own access and reflash**.
   one uncomment away; **no stock applet can open a network socket shell.** Only
   the **serial** console shell is free (inittab's `::askfirst:-/bin/sh`, plus the
   now-blank password). Network root needs an **injected** daemon — a static MIPS
-  bind-shell (`overlay/tcpsh.c`) is prepared but building it was blocked by the
+  bind-shell (`overlays/network/tcpsh.c`) is prepared but building it was blocked by the
   harness safety classifier; pending authorization. See rebuilding §2.
 - OTA signature caveat **RESOLVED**: `am7x_ota_upgrade.ko`/`am7x_upgrade.ko`/
   `fui.app`/`manager.app` show the additive sum + zlib CRC32s only — no rsa/sha/
@@ -289,6 +135,12 @@ Assistant. Steps:
 - Ship the HA-facing daemon in our repacked rootfs.
 
 This is high-effort but every piece is in a processor we can already open.
+
+**Update 2026-10-12:** the AM8250 already serves PJLink, a web UI, AMX,
+Crestron and SNMP (`atop_main`), so no daemon needs injecting for control while
+the projector is on. With the firmware's keep-network-in-standby option on, a Wake-on-LAN
+packet powers the projector on from standby. A Home Assistant integration
+that combines the two is in `ha/`; see [network-control.md](network-control.md).
 
 **Update after disassembling the NXP MCU** ([nxp-mcu.md](nxp-mcu.md)): the MCU
 does not unconditionally cut the network side. It has three standby flavours
@@ -348,14 +200,14 @@ recoverable.
 
 1. ~~Write `tools/mst9u_strcipher.py` (additive-shift OSD text)~~ **DONE/revised**
    — the OSD text is glyph-index encoded, not a cipher; `tools/mst9u_strings.py`
-   decodes it. Still needed for (b): a string-table/offset locator to handle a
-   length-changing edit.
+   decodes it. (b) was done as a same-length reword, so no string-table
+   relocation was needed.
 2. ~~Solve the scaler header field `0x1b41bbca`~~ **DONE** — it is CRC-32-MSB
    over `[0x20080..0xa9cf9)` (see rebuilding.md). Scaler repack is unblocked.
-3. Write the `MERGE.bin` repacker (in `mst9u_merge.py`) and prove a byte-identical
-   round-trip → unblocks scaler data edits (a/b).
-4. Write `tools/act_repack.py` and prove a byte-identical round-trip → unblocks
-   (c) and (d) on the AM8250.
+3. ~~Write the `MERGE.bin` repacker~~ **DONE** — `mst9u_merge.py` +
+   `build_scaler.py`; features a and b are flashed and confirmed.
+4. ~~Write `tools/act_repack.py`~~ **DONE** — byte-identical round-trip proven
+   and a rooted AM8250 image built (see (c); flash status in rebuilding.md §2).
 5. ~~Load the NXP image into Ghidra~~ **DONE** — NXP fully disassembled and
    decompiled (`decompiled/nxp_app.c`, `docs/nxp-mcu.md`). Nuvoton M451 still to
    do (also stock Cortex-M) for (d)/(f).

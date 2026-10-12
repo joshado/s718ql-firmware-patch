@@ -1,0 +1,15 @@
+# Feature a (v11) data patches. Format: RAM_addr expect_hex replace_hex.
+# -- display init: per-window 3-3-2 no-signal colour 0xff (white) -> 0x00 --
+0x1aa9f0 5080ff 508000
+0x1aad20 5080ff 508000
+# -- display init: frame colour 0xffffff -> 0 (movhi r4,0xff ; ori r4,r4,0xffff) --
+0x1aaa01 0480ff 048000
+0x1aaa04 c884ffff c8840000
+# -- osd_set_frame_color_rgb (0x1c70ec): the white behind the searching/splash
+#    logo. `b.or r4,r12,r11` (R|G<<8|B<<16) -> `b.ori r4,r0,0x0` = always black --
+0x1c7119 448c5d 508000
+# -- no-signal page logo: 24x16 block of logo glyphs, icon header
+#    {w=0x18,h=0x10,colour x3,...}. Colour 0xc2 = white on Dell blue (palette 2/0xc);
+#    alt variant 0x24. Set both nibbles to palette 0 (black) -> invisible --
+0x2da230 c2c2c2 000000
+0x2da0ab 242424 000000

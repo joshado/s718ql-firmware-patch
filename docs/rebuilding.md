@@ -5,7 +5,8 @@ must round-trip an unmodified input to a byte-identical output first.** Until it
 does, we don't understand the format well enough to trust a flash.
 
 **Flashed on hardware so far:** the **Network (AM8250) `ACTUPGRADE.bin`** (booted
-OK) and the **Scaler `MERGE.bin`** (build v1 applied + recovered) — see §1 and §2.
+OK) and the **Scaler `MERGE.bin`** (features a + b, builds v1–v11, all applied) —
+see §1 and §2.
 
 Risk ordering (safest to scariest to experiment on):
 **Network (AM8250) ≈ Actiontec (RTD1295) ≪ Nuvoton MCU ≈ NXP MCU ≪ DDP ≪ Scaler.**
@@ -17,7 +18,7 @@ but it is no longer the near-certain brick it was assumed to be.
 
 ---
 
-## 1. Scaler — `MERGE.bin` — repacker WRITTEN + round-trip PROVEN + flashed on HW (v1 applied; later builds not yet re-triggered)
+## 1. Scaler — `MERGE.bin` — repacker WRITTEN + round-trip PROVEN + flashed on HW (features a + b live)
 
 `tools/mst9u_merge.py` parses/verifies **and now repacks** it. Two modes:
 - `roundtrip` — passthrough rebuild that REUSES the original deflate bytes and
@@ -81,15 +82,17 @@ AEON assembly (fine for small hooks, impractical for large features). Free space
 for a hook exists past the image (BSS) or in padding, but a hook that grows the
 image still goes through the re-DEFLATE + re-checksum path above.
 
-### Flashed on hardware — repack mechanics PROVEN; recovery PROVEN (2026-10-11/12)
+### Flashed on hardware — repack mechanics and code injection PROVEN (2026-10-11/12)
 
-A patched scaler image **was flashed and ran** (build v1 = feature a bare-poke +
-feature b), which validates the whole repack pipeline end-to-end on real silicon:
-the re-DEFLATE + TEL fixup + all four checksums produce an image the on-device
-updater accepts and boots. Feature b (`"NEVER unplug"`) was visible on screen —
-proof the AP-stream patching lands correctly. ⚠️ **Only v1 ever applied** — every
-build since (v2, v3-diag, the stamped build) has NOT reached the projector (no
-auto-restart; stock text still on screen). See the OPEN ISSUE below.
+Patched scaler images have been flashed and run many times (features a and b,
+builds v1–v11; see feature-a-status.md). That validates the whole pipeline on
+real silicon: re-DEFLATE + TEL fixup + all four checksums produce an image the
+on-device updater accepts and boots, AP-stream data patches land where intended,
+and AEON code caves in the AP-prefix padding (`0x182048…`) execute.
+
+For a while on 2026-10-12 builds after v1 appeared not to apply. That was the
+**flash procedure being done wrong**, not the image — the correct procedure is
+in "Build & flash a scaler patch" below and has worked every time since.
 
 **The repacker output is VERIFIED sound (so the "build is broken" theories are
 ruled out):** the current `dist/scaler/MERGE.bin` passes the **device's own
@@ -98,15 +101,14 @@ integrity gate** — CRC-32 (poly `0x4c11db7`) over the whole file gives residue
 correct**: after the +~2 KB shift, every resource offset still resolves — the
 JPEG (`id=0xc500`) moved `0xb9d08 → 0xba4e1` and still lands on `FF D8` (SOI),
 the trailer resource on `55 AA`. And v1 was itself `delta≠0` (+1995 B over stock)
-through the same code, and flashed. So neither the length-field updates nor the
-TEL shift is the cause — the image that's on the USB *would* be accepted if read.
+through the same code, and flashed.
 
 **Brick / recovery note (precise):** `sboot`/`pm_8051` are kept byte-identical, so
-Download-Mode recovery stays available by design. What's been *observed* is that a
-**stalled flash attempt was non-fatal** — power-cycling returned the projector to
-the previous good image (v1), no SPI programmer needed. A full "flash stock to
-recover from a bad AP" has **not** actually been exercised (we never got a bad
-image onto the device), so treat full recovery as expected-but-unproven.
+Download-Mode recovery stays available by design. What's been *observed*: a
+**stalled flash attempt was non-fatal** (power-cycling returned the projector to
+the previous image), and re-flashing over a working patched image works
+repeatedly. Recovering from an AP that does **not boot** has not been exercised
+(no build has failed to boot), so treat that as expected-but-unproven.
 
 **How the USB updater works (from the AP, `MW_UsbDownload_*` / `Flash` /
 `FUN_ram_0021758b`):**
@@ -141,8 +143,12 @@ self-checks. Env `NOSTAMP=1` skips the on-screen version stamp (clean text).
 
 ```
 # 1. write a cave listing: tools/aeon-ghidra/patches/<name>.lst
-#    (hook site @0xADDR = b.j to the cave + nops; cave @0x182048 does the work,
-#     runs the DISPLACED original prologue, then b.j back after the hook).
+#    Each hook site (@0xADDR) = b.j to its cave + 2-byte nops (b.movi r0,0x0) to
+#    fill whole displaced instructions. Caves start at @0x182048 (empty AP-prefix
+#    padding), do the work, re-run the DISPLACED original instructions verbatim
+#    and contiguously, then b.j back to just after the hook. Several hook sites
+#    per listing are fine. Branch targets are absolute: assemble once, read the
+#    emitted addresses from the .asm.txt, fix the targets, assemble again.
 # 2. assemble it to bytes with the SLEIGH assembler (Docker):
 docker run --rm -v "$PWD/firmware/unpacked/scaler":/in:ro \
   -v "$PWD/tools/aeon-ghidra/patches":/patches -v "$PWD/tools/aeon-ghidra/scripts":/opt/scripts:ro \
@@ -154,17 +160,37 @@ NOSTAMP=1 python3 tools/build_scaler.py \
   "firmware/extracted/.../Projector FW/MERGE.bin" \
   tools/aeon-ghidra/patches/<name>.asm.txt \
   dist/scaler/MERGE.bin \
-  tools/aeon-ghidra/patches/feature-b-unplug.txt
+  tools/aeon-ghidra/patches/feature-b-unplug.txt [more data patches ...]
 ```
+
+**The current release build** (features a + b, no stamp; sha256 `918612e2…9135b`):
+
+```
+NOSTAMP=1 python3 tools/build_scaler.py \
+  "firmware/extracted/Dell-s718ql-projector-firmware-m0r005-2018-11-30/Projector FW/MERGE.bin" \
+  tools/aeon-ghidra/patches/feature-a-v11-allbg-black.asm.txt \
+  dist/scaler/MERGE.bin \
+  tools/aeon-ghidra/patches/feature-b-unplug.txt \
+  tools/aeon-ghidra/patches/feature-a-v11-black-data.txt
+```
+
+`build_scaler.py` guards: every data patch has an `expect` value; each hook
+site's overwritten bytes must reappear contiguously in the cave; the cave region
+must be empty in stock; the repacked image must pass the container self-check.
 
 **Verify before flashing** (cheap, catches everything we've hit):
 - `mm._check(built)` passes (build does this).
 - **Device CRC-32 gate**: residue of CRC-32 (poly `0x4c11db7`) over the whole file
   must be `0` — this is the exact integrity check the on-device updater runs.
-- **Re-disassemble the cave** (`AeonDisasmAt.java` at `0x182048` and the hook site)
-  and confirm the branch targets resolve and the displaced prologue continues the
-  hooked function correctly. (Caveat: linear disasm can misalign in functions with
-  indirect flow — cross-check the flow `.asm`, not just the `.c`.)
+- **Re-disassemble the built image** at the caves, hook sites and code-level data
+  patches: extract prefix + inflated AP from the built `MERGE.bin` (via
+  `mst9u_merge.parse`) to `firmware/unpacked/scaler/ap_combined_patched.bin`,
+  import that with `-noanalysis`, and run `-postScript AeonDisasmAt.java <count>
+  <addr>...`. Confirm branch targets resolve and the displaced instructions
+  continue the hooked function. (Caveat: linear disasm can misalign in functions
+  with indirect flow — cross-check the flow `.asm`, not just the `.c`. Code
+  reached only through data pointers is absent from the flow `.asm`; read raw
+  bytes.)
 
 **Flash** (procedure now confirmed working — this was earlier mis-done):
 1. Projector **OFF, power cord UNPLUGGED**. USB (FAT32) with `MERGE.bin` in the
@@ -184,10 +210,10 @@ reader sees a clean root).
 
 **Version stamp:** by default `build_scaler.py` writes a 7-hex build id into the
 HDMI1 no-signal line (git short-hash when the tree is clean, else a content hash),
-overwriting the glyphs `"switch input"` @`0x2f05be`. Known cosmetic issue: it
-bleeds the next string ("Se" from "Searching") because the renderer draws the
-whole 284-byte block by length; use `NOSTAMP=1` for clean text (identify builds by
-sha instead). Relocate/remove the stamp for a release.
+overwriting the glyphs `"switch input"` @`0x2f05be`. It **corrupts the on-screen
+text** (it bleeds into the next string, "Se" from "Searching", because the
+renderer draws the whole 284-byte block by length), so it is for diagnostic
+builds only. Release builds use `NOSTAMP=1`; identify them by sha.
 
 **Recovery nuance (from the sboot RE, `decompiled/sboot.c`):** `sboot` and the PM
 core are **8051** programs (Keil C51), *separate CPUs from the AEON AP*. They boot
@@ -256,7 +282,7 @@ verified against busybox's packed applet-name table, not just a string grep.
 Networking applets are only `arp arping ifconfig netstat ping route rx udhcpc
 udhcpd`. So **a config-only edit cannot open a root shell over the network**;
 the rcS line `#/usr/sbin/telnetd` is a dead comment. (An earlier unauthenticated
-bind-shell sketch, `overlay/tcpsh.c`, was abandoned in favour of a real
+bind-shell sketch, `overlays/network/tcpsh.c`, was abandoned in favour of a real
 authenticated SSH server.)
 
 **The injected daemon: static-musl dropbear.**
@@ -345,8 +371,11 @@ Android** (no adbd/props — see §4). Root was delivered the Linux way: add
 from `rcS` at boot — an always-on, unauthenticated **root shell** on TCP 1023
 (the adbd-as-root analog), persistent on the flashed rootfs. The stock image is
 already open too (empty root password; telnet :23; serial getty). Built artifact:
-`dist/actiontec/install.img` (+ `MANIFEST.txt`, `S98adbroot`), SHA256
-`08a6bf33…`. **No dm-verity** (plain ext2/ext4, remounted ro) so editing `/`
+`dist/actiontec/install.img`, SHA256 `08a6bf33…`; full record in
+`dist/actiontec/MANIFEST.txt`. (The injected init script itself — a leftover from
+the early "this is Android, add adbd" assumption — is not kept under version
+control; the manifest documents it verbatim.) **No dm-verity** (plain ext2/ext4,
+remounted ro) so editing `/`
 needs no hash-tree fixup; **GOLD rescue** images in the package make a bad flash
 recoverable. Not yet flashed to hardware.
 
@@ -407,6 +436,17 @@ the linker script and the merge script. The flasher exists:
 `tools/nxp_flash.py` speaks the BootCode's block protocol (documented in
 nxp-mcu.md, "Serial download protocol"); it is untested on hardware.
 
+**Flashing from macOS/Linux** (no Windows downloader needed; untested until
+the first real flash): USB-serial adapter on the DB9, then
+
+```sh
+uv run --with pyserial tools/nxp_flash.py IMAGE.hex --port /dev/cu.usbserial-XXXX --check   # standby; writes nothing
+uv run --with pyserial tools/nxp_flash.py IMAGE.hex --port /dev/cu.usbserial-XXXX --flash   # in download mode
+```
+
+`--check` sends the app's `#00501 1` query and expects `P0`/`P1`: it proves
+the adapter, wiring and baud rate before anything is erased.
+
 **Not recommended: recompiling `decompiled/nxp_app.c`.** It is hand-decompiled
 and unverified, and a different compiler emits different code, so there is
 nothing to diff against. The way to make whole-program recompilation
@@ -462,9 +502,8 @@ A display-only version bump is possible size-neutrally if ever wanted.
    building, and NXP/Nuvoton are where the power/serial features live.
 2. **Scaler data edits** — the container is fully solved (`0x1b41bbca` cracked,
    DEFLATE standard, all CRCs reproduced). Write `mst9u_merge.py`'s repacker and
-   prove a byte-identical round-trip, then do the `unplg` fix. The no-signal
-   colour needs the renderer located first (string-less; data-flow trace — see
-   feature-targets.md (a)).
+   prove a byte-identical round-trip, then do the `unplg` fix. **DONE**, along
+   with the no-signal colour (feature a) — both flashed and confirmed.
 3. **Linux custom code** — pick AM8250 or RTD1295 for streaming once one of them
    is confirmed rebuildable and we've checked for extra on-device signature
    checks.
