@@ -1,0 +1,34 @@
+# Feature a (v8): RED no-signal = v7 (frame-colour enable + red) PLUS re-enabling ch1.
+# v7 result: no-signal stayed blue. Likely cause (agent step-2): mode 4 MUTES scaler
+# channel 1 (scaler_setup_17b6 writes 0x101d20 bit0=0), so even an enabled frame-colour
+# is suppressed to the boot-default blue. This build first RE-ENABLES ch1 via
+# scaler_ch_set_enable(1,1) (0x1c369a: sets bit0 of 0x101d00+ch*0x20 = 0x101d20),
+# then calls osd_set_frame_color() (frame-colour display enable, sets white), then
+# overrides 0x90102f33 to RED (0xff). Hook at osd_nosig_draw (0x1dbc84).
+#   If this paints RED -> ch1-mute was the blocker; swap red->black to finish.
+#   If video noise/garbage -> re-enabling ch1 shows the (absent) input; back off that.
+# Saves/restores r9/r10; runs the 3 displaced prologue instrs; returns to 0x1dbc8c.
+@0x182048
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.ori r3,r0,0x1
+b.ori r4,r0,0x1
+b.jal 0x1c369a
+b.jal 0x1ff83c
+b.movhi r3,0x9010
+b.ori r3,r3,0x2f33
+b.ori r4,r0,0xff
+b.jal 0x1c64ed
+b.lwz r9,0x4(r1)
+b.lwz r10,0x0(r1)
+b.addi r1,r1,0x8
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.j 0x1dbc8c
+# --- hook site: 8 bytes (0x1dbc84..0x1dbc8c), b.j + two r0 nops ---
+@0x1dbc84
+b.j 0x182048
+b.movi r0,0x0
+b.movi r0,0x0

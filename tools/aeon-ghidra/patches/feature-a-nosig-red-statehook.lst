@@ -1,0 +1,32 @@
+# Feature a (v6): RED via osd_set_bg_color_332 at the WIDER state handler.
+# osd_set_bg_color_332 (0x1be86b) is the per-window OSD-window bg setter that DID
+# flash visible red before (transiently, when hooked at the mode-4 draw handler
+# osd_nosig_draw). This build moves it to the WIDER handler osd_no_input_handler
+# (0x1e73fe) -- the no-input state machine that runs for ALL no-input screens
+# (searching mode 0x0e AND no-signal mode 4), i.e. where the searching screen sets
+# its own colour. Goal: see if applying it from this wider/earlier point makes the
+# red persist (and/or cover more screens) rather than flashing transiently.
+# osd_set_bg_color_332(param_1=window group 0, param_2=0xe0 = red in 3-3-2).
+#
+# Hook replaces the 14-byte prologue of osd_no_input_handler; cave runs that
+# prologue first (saving r9-r12 before the call can clobber them), calls
+# osd_set_bg_color_332(0,0xe0), then continues at 0x1e740c. Body reloads r10-r12;
+# epilogue restores r9-r12.
+@0x182048
+b.addi r1,r1,-0x10
+b.sw 0xc(r1),r9
+b.sw 0x8(r1),r10
+b.sw 0x4(r1),r11
+b.sw 0x0(r1),r12
+b.ori r3,r0,0x0
+b.ori r4,r0,0xe0
+b.jal 0x1be86b
+b.j 0x1e740c
+# --- hook site: 14 bytes (the whole prologue) = b.j + five r0 nops ---
+@0x1e73fe
+b.j 0x182048
+b.movi r0,0x0
+b.movi r0,0x0
+b.movi r0,0x0
+b.movi r0,0x0
+b.movi r0,0x0

@@ -1,0 +1,33 @@
+# Feature a (v4): drop the no-signal BLUE -> BLACK via the free-run frame colour.
+# Hook osd_nosig_draw (0x1dbc84) -> cave at 0x182048. The cave calls the firmware's
+# own osd_set_frame_color_rgb(0,0,0) (0x1c70ec): it does FUN_ram_001c63ce(0xf,1)
+# [the LATCH that v1 omitted] then scaler_reg_write24(0x90102f33, R|G<<8|B<<16),
+# i.e. writes the FREE-RUN frame-colour register = the actual stable-blue surface.
+#   - v1 wrote 0x90102f33 directly but WITHOUT the latch -> no effect (blue stayed).
+#   - v2 used osd_set_bg_color_332 = the OSD WINDOW bg (wrong surface) -> red only
+#     flashed transiently and corrupted the logo/text draw.
+#   - This (v4) writes the free-run colour WITH the latch, and is lighter than
+#     osd_set_bg_color_332 (no FUN_ram_001d11b0 / no GRAM-port writes), so the
+#     subsequent logo+text draw should stay clean.
+# R=G=B=0 -> black. (For red instead: r3=0xff, r4=0, r5=0.)
+# Saves/restores r9/r10; runs the 3 displaced prologue instrs; returns to 0x1dbc8c.
+@0x182048
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.ori r3,r0,0x0
+b.ori r4,r0,0x0
+b.ori r5,r0,0x0
+b.jal 0x1c70ec
+b.lwz r9,0x4(r1)
+b.lwz r10,0x0(r1)
+b.addi r1,r1,0x8
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.j 0x1dbc8c
+# --- hook site: exactly 8 bytes (0x1dbc84..0x1dbc8c), b.j + two r0 nops ---
+@0x1dbc84
+b.j 0x182048
+b.movi r0,0x0
+b.movi r0,0x0

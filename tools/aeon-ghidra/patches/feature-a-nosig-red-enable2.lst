@@ -1,0 +1,31 @@
+# Feature a (v9): RED no-signal by calling the frame-colour ENABLE DIRECTLY.
+# v7/v8 went via osd_set_frame_color (0x1ff83c), which has an early-return
+# (if DAT+0x45c != 0) that likely fires in the mode-4 context -> the enable
+# FUN_ram_001ac05b was never reached, so writing 0x90102f33 had no gate (= v1).
+# This cave bypasses that: it loads the window mask (uRam0030f6da @ 0x30f6da, u16),
+# calls FUN_ram_001ac05b(mask, 0) [the per-window "show frame-colour" enable,
+# verified in the flow .asm @0x1ac05b], then writes 0x90102f33 = RED (0xff).
+# Hook at osd_nosig_draw (0x1dbc84). If this paints red, the gate was the blocker.
+@0x182048
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.ori r3,r0,0xf
+b.movi r4,0x0
+b.jal 0x1ac05b
+b.movhi r3,0x9010
+b.ori r3,r3,0x2f33
+b.ori r4,r0,0xff
+b.jal 0x1c64ed
+b.lwz r9,0x4(r1)
+b.lwz r10,0x0(r1)
+b.addi r1,r1,0x8
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.j 0x1dbc8c
+# --- hook site: 8 bytes, b.j + two r0 nops ---
+@0x1dbc84
+b.j 0x182048
+b.movi r0,0x0
+b.movi r0,0x0

@@ -1,0 +1,33 @@
+# Feature a (v5): BLACK no-signal via the STATE handler (timing test).
+# Prior builds hooked the DRAW handler osd_nosig_draw and set 0x90102f33 there;
+# that failed. The searching screen (which IS visibly white) sets its colour from
+# the STATE handler osd_no_input_handler (0x1e73fe) via osd_set_frame_color, with
+# the latch, at setup time. So hook osd_no_input_handler's ENTRY and call the same
+# setter osd_set_frame_color_rgb(0,0,0) (0x1c70ec) -> free-run reg 0x90102f33 = black.
+# If no-signal goes black, the earlier failures were draw-time TIMING (not the wrong
+# register). If it stays blue, the no-signal surface is genuinely NOT 0x90102f33.
+#
+# The hook replaces the full 14-byte prologue of osd_no_input_handler
+# (addi r1,-0x10; sw 0xc(r1),r9; sw 0x8(r1),r10; sw 0x4(r1),r11; sw 0x0(r1),r12).
+# The cave runs that prologue FIRST (so r9-r12 are saved before the call can clobber
+# them), calls osd_set_frame_color_rgb(0,0,0), then continues at 0x1e740c (after the
+# prologue). The body reloads r10-r12 as needed; the epilogue restores r9-r12.
+@0x182048
+b.addi r1,r1,-0x10
+b.sw 0xc(r1),r9
+b.sw 0x8(r1),r10
+b.sw 0x4(r1),r11
+b.sw 0x0(r1),r12
+b.ori r3,r0,0x0
+b.ori r4,r0,0x0
+b.ori r5,r0,0x0
+b.jal 0x1c70ec
+b.j 0x1e740c
+# --- hook site: 14 bytes (the whole prologue) = b.j + five r0 nops ---
+@0x1e73fe
+b.j 0x182048
+b.movi r0,0x0
+b.movi r0,0x0
+b.movi r0,0x0
+b.movi r0,0x0
+b.movi r0,0x0

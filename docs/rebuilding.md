@@ -132,27 +132,62 @@ image onto the device), so treat full recovery as expected-but-unproven.
   exactly which stage runs (or `"No updated file in USB is found"`), and is the
   definitive diagnostic if a flash misbehaves.
 
-**Version stamp (so builds are distinguishable on screen).** `build_scaler.py`
-auto-writes the **git short-hash** into the HDMI1 no-signal line, size-neutrally:
-it overwrites the 12 glyphs `"switch input"` (@`0x2f05be`) with `"v<7-hex-hash>"`.
-After flashing, the no-signal screen reads `...Press "Source" to v<hash>` — so
-"did this exact build flash?" is answered at a glance (drop/relocate the stamp
-for a release build).
+### Build & flash a scaler patch — step by step
 
-**OPEN ISSUE — recent builds not applying (flash is not being triggered).** v1
-applied; v2, v3-diag and the stamped build did **not** — no auto-restart, no-signal
-line still shows stock `"switch input"`. Everything about the *build* is ruled out:
-the file is verified byte-for-byte on the FAT32 USB (sha matches), it passes the
-device's own CRC-32 gate (residue 0), TEL offsets resolve, and the updater has no
-version/anti-rollback gate. So the problem is **upstream of the updater** — either
-Download Mode isn't actually being entered on the repeat attempts, or the file
-isn't being read. The official PDF trigger is state-sensitive: projector OFF with
-power **unplugged**, insert USB, plug power in **without pressing Power** (sits at
-Standby), then hold Power → at Amber/White-flash press Freeze → release both. If
-the projector was already powered on, the combo won't drop it into Download Mode.
-Next step: either capture the scaler debug UART during the attempt (the updater is
-chatty — see above), or extract the Download-Mode arming condition from the boot
-code to confirm the exact required state.
+**Build** (`tools/build_scaler.py`): applies an assembled AEON cave + size-neutral
+data patches to stock `MERGE.bin`, recomputes all framing (CRC-16, header CRC-32,
+trailer CRC-32, `ap_flash_end`/`ap_ram_end`/`filesize`, TEL offsets), and
+self-checks. Env `NOSTAMP=1` skips the on-screen version stamp (clean text).
+
+```
+# 1. write a cave listing: tools/aeon-ghidra/patches/<name>.lst
+#    (hook site @0xADDR = b.j to the cave + nops; cave @0x182048 does the work,
+#     runs the DISPLACED original prologue, then b.j back after the hook).
+# 2. assemble it to bytes with the SLEIGH assembler (Docker):
+docker run --rm -v "$PWD/firmware/unpacked/scaler":/in:ro \
+  -v "$PWD/tools/aeon-ghidra/patches":/patches -v "$PWD/tools/aeon-ghidra/scripts":/opt/scripts:ro \
+  aeon-ghidra /work aeon -import /in/ap_combined.bin -processor AEON:BE:32:R2 \
+  -loader BinaryLoader -loader-baseAddr 0x180000 -scriptPath /opt/scripts \
+  -postScript AeonAssemble.java /patches/<name>.lst /patches/<name>.asm.txt -deleteProject -overwrite
+# 3. build the image (stock MERGE.bin, asm.txt, out, then any data-patch .txt files):
+NOSTAMP=1 python3 tools/build_scaler.py \
+  "firmware/extracted/.../Projector FW/MERGE.bin" \
+  tools/aeon-ghidra/patches/<name>.asm.txt \
+  dist/scaler/MERGE.bin \
+  tools/aeon-ghidra/patches/feature-b-unplug.txt
+```
+
+**Verify before flashing** (cheap, catches everything we've hit):
+- `mm._check(built)` passes (build does this).
+- **Device CRC-32 gate**: residue of CRC-32 (poly `0x4c11db7`) over the whole file
+  must be `0` — this is the exact integrity check the on-device updater runs.
+- **Re-disassemble the cave** (`AeonDisasmAt.java` at `0x182048` and the hook site)
+  and confirm the branch targets resolve and the displaced prologue continues the
+  hooked function correctly. (Caveat: linear disasm can misalign in functions with
+  indirect flow — cross-check the flow `.asm`, not just the `.c`.)
+
+**Flash** (procedure now confirmed working — this was earlier mis-done):
+1. Projector **OFF, power cord UNPLUGGED**. USB (FAT32) with `MERGE.bin` in the
+   **root** in the Type-A port.
+2. **Plug in power — do NOT press Power.** It sits at **Standby**.
+3. Press & hold **Power**; when the Power LED flashes **Amber/White**, press
+   **Freeze** on the remote, release both → Download Mode. ~40 s, LED White →
+   White-flashing, then auto-returns to standby on success.
+4. Power on normally to see the result. **The on-screen result (colour/stamp) and
+   the USB sha are how you confirm which build ran** — the updater has no version
+   gate and will flash whatever valid `MERGE.bin` it finds.
+
+Mac USB helper: `cp dist/scaler/MERGE.bin /Volumes/FWUPDATE/MERGE.bin && dot_clean
+-m /Volumes/FWUPDATE && rm -f /Volumes/FWUPDATE/._MERGE.bin && sync && diskutil
+eject /Volumes/FWUPDATE` (strip the macOS `._*` AppleDouble so the embedded FAT
+reader sees a clean root).
+
+**Version stamp:** by default `build_scaler.py` writes a 7-hex build id into the
+HDMI1 no-signal line (git short-hash when the tree is clean, else a content hash),
+overwriting the glyphs `"switch input"` @`0x2f05be`. Known cosmetic issue: it
+bleeds the next string ("Se" from "Searching") because the renderer draws the
+whole 284-byte block by length; use `NOSTAMP=1` for clean text (identify builds by
+sha instead). Relocate/remove the stamp for a release.
 
 **Recovery nuance (from the sboot RE, `decompiled/sboot.c`):** `sboot` and the PM
 core are **8051** programs (Keil C51), *separate CPUs from the AEON AP*. They boot

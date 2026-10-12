@@ -1,0 +1,35 @@
+# Feature a (v7): RED no-signal via the FRAME-COLOUR ENABLE (the missing piece).
+# Agent finding (docs/feature-a-blue-hunt.md): 0x90102f33 is only DISPLAYED when a
+# per-window "show frame-colour" enable bit is set, written by FUN_ram_001ac05b
+# ("Enable Frame Color"). The searching screen is white because osd_set_frame_color
+# (0x1ff83c) does the FULL sequence incl. that enable; the no-signal path never does,
+# so the boot-default blue (the layer below the windows) shows. v1/v2/v4/v5 all wrote
+# 0x90102f33 but NEVER called the enable -> nothing / transient.
+#
+# This cave (at osd_nosig_draw 0x1dbc84) calls the real osd_set_frame_color() to turn
+# the frame-colour display ON (it sets white), then OVERRIDES 0x90102f33 to RED
+# (0xff = R=0xff,G=0,B=0) via scaler_reg_write24. Burn-in mode proves the displayed
+# colour is 0x90102f33, so the override should show red.
+#   RED (0xff) chosen as the clear signal; swap to BLACK (0x000000) once confirmed.
+# Saves/restores r9/r10; runs the 3 displaced prologue instrs; returns to 0x1dbc8c.
+@0x182048
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.jal 0x1ff83c
+b.movhi r3,0x9010
+b.ori r3,r3,0x2f33
+b.ori r4,r0,0xff
+b.jal 0x1c64ed
+b.lwz r9,0x4(r1)
+b.lwz r10,0x0(r1)
+b.addi r1,r1,0x8
+b.addi r1,r1,-0x8
+b.sw 0x4(r1),r9
+b.sw 0x0(r1),r10
+b.j 0x1dbc8c
+# --- hook site: 8 bytes (0x1dbc84..0x1dbc8c), b.j + two r0 nops ---
+@0x1dbc84
+b.j 0x182048
+b.movi r0,0x0
+b.movi r0,0x0
