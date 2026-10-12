@@ -77,10 +77,13 @@ ops:
 
 Each is `unpack → apply patches → repack → verify`, reusing rebuilding.md:
 
-- **Scaler (`MERGE.bin`)** — `mst9u_merge.py` unpack → inflate AP → apply
-  byte/asm/string/inject ops → re-DEFLATE raw (`zlib -15`, lvl 9) → fix CRC-16 +
-  header CRC-32 (incl. the solved `0x1b41bbca`) + trailer CRC-32 +
-  `ap_flash_end`/`filesize`. Needs the repacker written.
+- **Scaler (`MERGE.bin`)** — **WRITTEN.** `tools/mst9u_merge.py` (repack +
+  round-trip) and `tools/build_scaler.py` (apply asm cave + size-neutral data
+  patches + auto git-hash **version stamp**, with `expect` guards and a container
+  self-check). Flow: unpack → inflate AP → apply byte/asm/string ops →
+  re-DEFLATE raw (`zlib -15`, lvl 9) → fix CRC-16 + header CRC-32 (incl. the
+  solved `0x1b41bbca`) + trailer CRC-32 + `ap_flash_end`/`ap_ram_end`/`filesize`
+  + TEL offset fixup. Proven on hardware (see rebuilding.md §1).
 - **Network (AM8250, `ACTUPGRADE.bin`)** — `act_unpack.py` → edit ext2 rootfs →
   splice → recompute additive sum (`act_repack.py`, to write). Cleanest target.
 - **Actiontec (RTD1295, `install.img`)** — untar → edit `rootfs.ext4.bin` via

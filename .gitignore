@@ -13,3 +13,7 @@ tools/aeon-ghidra/*.zip
 dist/
 firmware/unpacked/scaler/ap_combined_patched.bin
 firmware/unpacked/scaler/feature-a-asm.txt
+
+# Python bytecode
+__pycache__/
+*.pyc

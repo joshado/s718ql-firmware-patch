@@ -53,11 +53,20 @@ shows null separators between messages, which is promising.
 
 ## (a) No-input-source background colour
 
-**Status: subsystems identified by strings; mechanism NOT confirmed in code;
-the exact colour value NOT found.** Be careful reading the earlier optimistic
-notes — the following is what is actually established vs inferred.
+**Status (2026-10-12): renderer found and hooked, cave execution proven, but the
+blue-fill surface is STILL OPEN after two hardware disproofs.** The no-signal
+screen is a two-layer composite (logo/text OSD over a blue field); the mode-4
+renderer `osd_nosig_draw` (`0x1dbc84`) is located and our AEON code-cave hook
+provably runs (feature b and the logo/text still render through it). **But** the
+two most likely sources of the blue — the free-run frame reg `0x90102f33` (v1)
+and the group-0 per-window background via `osd_set_bg_color_332` (v2) — were
+**both flashed and both left the screen blue.** See the HARDWARE RESULTS block
+further down. The sections below are the original code-trace; read them for
+evidence, but note the "blue = `0x90102f33` default" conclusion is now wrong.
+*A separate flash-delivery issue currently blocks confirming new builds — see
+rebuilding.md §1.*
 
-*Established:*
+*Established (original string/code trace — see hardware caveats above):*
 - The Dell logo is a 2-tone JPEG (82% white bg, 18% Dell blue ~RGB 20,135,199)
   stored as TEL resource type `0xc5` at `MERGE.bin 0xb9d08`, size `0x5110`. Its
   resource record holds only type/offset/size — **no colour or palette data**.
@@ -116,9 +125,13 @@ There is **no colour inversion** anywhere; the premise that the stored Dell JPEG
 is recoloured was a red herring. The screen is built from two separate hardware
 layers:
 
-- **Layer 1 — the BLUE background:** the scaler's **free-run frame generator**,
-  register **`0x90102f33`** (RGB888: `f33`=R, `f34`=G, `f35`=B; a 24-bit write via
-  `scaler_reg_write24` puts `V = R | G<<8 | B<<16`). This is NOT part of the OSD.
+- **Layer 1 — the BLUE background:** ⚠️ **DISPROVEN ON HARDWARE (see below).**
+  This was believed to be the scaler's **free-run frame generator** register
+  **`0x90102f33`** (RGB888: `f33`=R, `f34`=G, `f35`=B; 24-bit write via
+  `scaler_reg_write24`). But writing that register red (v1) left the screen blue,
+  and writing the full `osd_set_bg_color_332` sequence (v2) did too — so the
+  visible blue is driven by **some other surface, still unidentified.** The two
+  bullets below (Layer 2 / logo) remain correct.
 - **Layer 2 — the WHITE Dell logo + "No signal"/"Press Source" text:** the mode-4
   **OSD overlay** (`g_osd_mode==0x04`), drawn by `osd_nosig_draw` (`0x1dbc84`):
   it streams two **2-bits-per-pixel indexed** OSD-GRAM bitmaps via
@@ -137,8 +150,10 @@ JPEG (`images/jpeg_0b9d08.jpg`, B_ID `0xc500`) is a *separate* asset for the
 free-run background). The two assets simply have opposite colour schemes — that
 is the whole of the "inversion."
 
-**Where the blue comes from = the power-on/boot DEFAULT of `0x90102f33`.** Across
-the entire AP, every literal written to that register is `0xffffff` (white, the
+**Where the blue comes from — ⚠️ the theory below (boot DEFAULT of `0x90102f33`)
+was DISPROVEN on hardware (v1/v2 above); kept for the code-trace evidence, but
+the conclusion is wrong — the real surface is elsewhere and still unidentified.**
+Across the entire AP, every literal written to that register is `0xffffff` (white, the
 "searching"/ShowDiag path `osd_set_frame_color` `0x1ff83c`) or the burn-in cycle
 table (`g_nosig_bg_colors` `0x2cf6e4`, mode `0x0d` only); **no code ever writes
 blue.** The normal video→no-signal path (`osd_no_input_handler` `0x1e73fe` line
@@ -159,19 +174,34 @@ signal is lost with a menu open, not the normal case.)*
    bare `scaler_reg_write24(0x90102f33, …)`. Needs AEON code injection + repack
    (both solved); implemented as the `0x182048` cave (feature-a-nosig-red.lst).
 
-   **HARDWARE RESULT (2026-10-11):**
-   - **v1 — `scaler_reg_write24(0x90102f33, 0xff)` (bare poke): FAILED.** Flashed
-     fine, feature-b visible, but the no-signal screen stayed blue. Root cause:
-     the *visible* free-run background is driven by **per-window** background
-     MMIO registers (written by `osd_set_bg_color_332` via `scaler_mmio_write_byte`
-     to each `g_window_ctx` entry) plus the `FUN_ram_001c63ce` window-priority
-     latch. `0x90102f33` alone is necessary but **not sufficient** — the
-     per-window regs still held blue, so nothing changed on screen.
-   - **v2 — `osd_set_bg_color_332(0, 0xe0)` (red): BUILT, statically verified,
-     awaiting hardware confirm.** Replicates the exact sequence the firmware uses
-     to paint the menu white (`osd_set_bg_color_332(0,0xff)`): per-window bg regs
-     + frame reg + latch. Cave re-disassembled: calls `0x1be86b`, returns to
-     `0x1dbc8c`, displaced prologue resumes `osd_nosig_draw` correctly.
+   **HARDWARE STATUS (2026-10-12) — only ONE result exists; the colour fix is
+   NOT disproven, it is mostly UNTESTED. ⚠️ Only build v1 ever reached the flash;
+   every build after it (v2, v3-diag, the stamped build) did NOT apply (see the
+   delivery issue below), so they have NO hardware result.**
+   - **v1 — `scaler_reg_write24(0x90102f33, 0xff)` (bare poke): ACTUALLY FLASHED,
+     FAILED.** Applied (feature b `"NEVER unplug"` visible on screen; logo+text
+     render ⟹ the cave executes), but the no-signal background stayed blue. ⟹
+     **the visible blue is NOT register `0x90102f33` alone.** This one result
+     overturns the "Layer 1 = `0x90102f33` boot default" model below.
+   - **v2 — `osd_set_bg_color_332(0, 0xe0)` (red; the firmware's own bg routine
+     that also drives the per-window MMIO bg regs + `FUN_ram_001c63ce` latch):
+     BUILT + statically verified, but NEVER APPLIED → UNTESTED.** This remains the
+     leading candidate fix; do NOT treat it as failed.
+   - **v3-diag — cave draws the `?` icon at the logo GRAM slot (`0x20`) + NOPs
+     the real logo draw:** built to prove the cave *executes persistently*
+     (3-way: `?` icon = cave runs / blank = doesn't / Dell logo = old build).
+     NEVER APPLIED → UNTESTED.
+   - **Net:** the only firm conclusion is that bare `0x90102f33` isn't the visible
+     surface. `osd_set_bg_color_332` (v2) is still the most likely fix and must be
+     tested once flashing works again. If it also fails, prime suspects become a
+     *different* window index's bg, a scaler blank/mute colour block, or a
+     panel/TCON default — a serial read of the regs at no-signal would pin it.
+   - **BLOCKER — new builds aren't flashing (see rebuilding.md §1).** Since v1,
+     nothing has reached the projector: no auto-restart, and the no-signal line
+     still shows stock text. The git-hash **version stamp** (now auto-added by
+     `build_scaler.py`, overwriting the 12 glyphs `"switch input"` @`0x2f05be`
+     with `"v<hash>"`) exists precisely so that, once flashing works, we can tell
+     at a glance whether a given build actually landed.
 2. **Limited data edit (menu path only).** Change the `0xff` immediate in
    `osd_set_bg_color_332(0,0xff)` at line 76483 to a packed-3-3-2 value — a pure
    data edit, but only affects the "signal lost with menu open" case, so it is not

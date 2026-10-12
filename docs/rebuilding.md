@@ -2,18 +2,22 @@
 
 How to reconstruct each image after modification. The golden rule: **a repacker
 must round-trip an unmodified input to a byte-identical output first.** Until it
-does, we don't understand the format well enough to trust a flash. None of the
-repackers below have been flashed to hardware yet.
+does, we don't understand the format well enough to trust a flash.
+
+**Flashed on hardware so far:** the **Network (AM8250) `ACTUPGRADE.bin`** (booted
+OK) and the **Scaler `MERGE.bin`** (build v1 applied + recovered) — see §1 and §2.
 
 Risk ordering (safest to scariest to experiment on):
 **Network (AM8250) ≈ Actiontec (RTD1295) ≪ Nuvoton MCU ≈ NXP MCU ≪ DDP ≪ Scaler.**
 The Linux SoCs have rescue/gold images in the package; the scaler's updater
-lives *inside* the image you'd be replacing, so a bad scaler flash likely needs
-an external SPI programmer to recover.
+lives *inside* the image you'd be replacing — but in practice `sboot`/`pm_8051`
+stay byte-identical across our builds, so Download-Mode recovery has held without
+an external SPI programmer (proven 2026-10-12). Keep that recovery path in mind,
+but it is no longer the near-certain brick it was assumed to be.
 
 ---
 
-## 1. Scaler — `MERGE.bin` — repacker WRITTEN + round-trip PROVEN (not flashed)
+## 1. Scaler — `MERGE.bin` — repacker WRITTEN + round-trip PROVEN + flashed on HW (v1 applied; later builds not yet re-triggered)
 
 `tools/mst9u_merge.py` parses/verifies **and now repacks** it. Two modes:
 - `roundtrip` — passthrough rebuild that REUSES the original deflate bytes and
@@ -77,12 +81,78 @@ AEON assembly (fine for small hooks, impractical for large features). Free space
 for a hook exists past the image (BSS) or in padding, but a hook that grows the
 image still goes through the re-DEFLATE + re-checksum path above.
 
-**Not yet proven on hardware.** The repacker is written and the passthrough
-round-trip is byte-identical, but nothing has been flashed. Flashing risk is the highest of all components: the USB
-updater lives *inside* the image being replaced, so a bad flash likely bricks
-the scaler until reflashed with an **external SPI programmer**. Establish that
-SPI recovery path (identify the flash chip, wire up a CH341A/flashrom) **before**
-the first scaler flash.
+### Flashed on hardware — repack mechanics PROVEN; recovery PROVEN (2026-10-11/12)
+
+A patched scaler image **was flashed and ran** (build v1 = feature a bare-poke +
+feature b), which validates the whole repack pipeline end-to-end on real silicon:
+the re-DEFLATE + TEL fixup + all four checksums produce an image the on-device
+updater accepts and boots. Feature b (`"NEVER unplug"`) was visible on screen —
+proof the AP-stream patching lands correctly. ⚠️ **Only v1 ever applied** — every
+build since (v2, v3-diag, the stamped build) has NOT reached the projector (no
+auto-restart; stock text still on screen). See the OPEN ISSUE below.
+
+**The repacker output is VERIFIED sound (so the "build is broken" theories are
+ruled out):** the current `dist/scaler/MERGE.bin` passes the **device's own
+integrity gate** — CRC-32 (poly `0x4c11db7`) over the whole file gives residue
+**`0x00000000`** (= pass), identical to stock. The **TEL fixup is verified
+correct**: after the +~2 KB shift, every resource offset still resolves — the
+JPEG (`id=0xc500`) moved `0xb9d08 → 0xba4e1` and still lands on `FF D8` (SOI),
+the trailer resource on `55 AA`. And v1 was itself `delta≠0` (+1995 B over stock)
+through the same code, and flashed. So neither the length-field updates nor the
+TEL shift is the cause — the image that's on the USB *would* be accepted if read.
+
+**Brick / recovery note (precise):** `sboot`/`pm_8051` are kept byte-identical, so
+Download-Mode recovery stays available by design. What's been *observed* is that a
+**stalled flash attempt was non-fatal** — power-cycling returned the projector to
+the previous good image (v1), no SPI programmer needed. A full "flash stock to
+recover from a bad AP" has **not** actually been exercised (we never got a bad
+image onto the device), so treat full recovery as expected-but-unproven.
+
+**How the USB updater works (from the AP, `MW_UsbDownload_*` / `Flash` /
+`FUN_ram_0021758b`):**
+- **Trigger (official Dell procedure, from the setup-guide PDF):** USB in the
+  Type-A port, projector OFF. Plug in power (do *not* press power to turn on). At
+  **Standby**, press & hold **Power**; when the Power LED flashes Amber/White,
+  press **Freeze** on the remote, then release both → Download Mode. LED sequence
+  Amber → Power+Menu White → White → White-flashing; ~40 s; auto-returns to
+  standby (white-flashing) on success. There is also a **boot-time auto-update**
+  path (`FUN_ram_001f386c` checks a flag and calls the updater) — this is what
+  "restarts itself" after a successful write.
+- **File search:** the updater scans the **FAT root** for a file named
+  **`MERGE.bin`** only. (`"Merge2.bin"`/`"AP.bin"` appear in log strings but are
+  **not** real search targets — the only filename constant in the image is
+  `MERGE.BIN`, so renaming to `AP.bin` is a dead end; there is no app-only image.)
+- **Integrity gate:** before writing, the whole file is checked with **CRC-32**
+  (poly `0x4c11db7`) — `"CRC32 Integrity Check pass"` / `"...failed"`.
+- **Write:** a **sector-differential** compare/erase/write/verify over 64 KB
+  sectors (`"Comparing image..."`, `"Erasing..."`, `"Writing..."`,
+  `"Verifying..."`, `"Success."`) — only sectors that differ from what's in flash
+  are rewritten. **No version / anti-rollback / same-version-skip gate anywhere.**
+- The updater is **chatty on the scaler debug UART** — a serial capture shows
+  exactly which stage runs (or `"No updated file in USB is found"`), and is the
+  definitive diagnostic if a flash misbehaves.
+
+**Version stamp (so builds are distinguishable on screen).** `build_scaler.py`
+auto-writes the **git short-hash** into the HDMI1 no-signal line, size-neutrally:
+it overwrites the 12 glyphs `"switch input"` (@`0x2f05be`) with `"v<7-hex-hash>"`.
+After flashing, the no-signal screen reads `...Press "Source" to v<hash>` — so
+"did this exact build flash?" is answered at a glance (drop/relocate the stamp
+for a release build).
+
+**OPEN ISSUE — recent builds not applying (flash is not being triggered).** v1
+applied; v2, v3-diag and the stamped build did **not** — no auto-restart, no-signal
+line still shows stock `"switch input"`. Everything about the *build* is ruled out:
+the file is verified byte-for-byte on the FAT32 USB (sha matches), it passes the
+device's own CRC-32 gate (residue 0), TEL offsets resolve, and the updater has no
+version/anti-rollback gate. So the problem is **upstream of the updater** — either
+Download Mode isn't actually being entered on the repeat attempts, or the file
+isn't being read. The official PDF trigger is state-sensitive: projector OFF with
+power **unplugged**, insert USB, plug power in **without pressing Power** (sits at
+Standby), then hold Power → at Amber/White-flash press Freeze → release both. If
+the projector was already powered on, the combo won't drop it into Download Mode.
+Next step: either capture the scaler debug UART during the attempt (the updater is
+chatty — see above), or extract the Download-Mode arming condition from the boot
+code to confirm the exact required state.
 
 **Recovery nuance (from the sboot RE, `decompiled/sboot.c`):** `sboot` and the PM
 core are **8051** programs (Keil C51), *separate CPUs from the AEON AP*. They boot
@@ -100,12 +170,16 @@ tracing or a serial console.
 
 ---
 
-## 2. Network (AM8250) — `ACTUPGRADE.bin` — repacker WRITTEN + round-trip PROVEN; rooted image BUILT w/ serial + SSH root (not flashed)
+## 2. Network (AM8250) — `ACTUPGRADE.bin` — repacker WRITTEN + round-trip PROVEN; rooted image BUILT; **repack VALIDATED ON HARDWARE** (flashed, booted OK)
 
 The cleanest target. `tools/act_unpack.py` splits it; `tools/act_repack.py`
 rebuilds it. **Round-trip is byte-identical** (re-packing the pristine image with
 no changes reproduces it exactly, SHA-256 `2cf39081…`, and the recomputed sum
-equals the stored value).
+equals the stored value). **A repacked `ACTUPGRADE.bin` was flashed and the unit
+came back OK** (reported on-screen IP `10.0.50.100`, the static `eth0` from
+`user.sh`) — so the container/additive-sum repack is proven on real hardware. The
+first flash was the serial-root build; the dropbear-SSH build (port 22,
+`root`/`projector`) was prepared next.
 
 **The integrity field — fully pinned.** CHECKSUM record at file offset `0x20`
 (`name[16]`, then `<4I` at `0x30`: `hdr_len`, `body_len`, `0`, `checksum`). The
